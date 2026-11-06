@@ -13,9 +13,13 @@ import (
 // line that uses a Style value (for example "Style.spacing.xl * 3").
 // If this test proves flaky, drop it and rely on review.
 func TestNoMagicNumbersInTestSurface(t *testing.T) {
-	files, _ := filepath.Glob(filepath.Join(repoRoot, "testsurface", "*.qml"))
+	var files []string
+	for _, pattern := range []string{"modules/*/*.qml", "examples/*/*.qml"} {
+		m, _ := filepath.Glob(filepath.Join(repoRoot, pattern))
+		files = append(files, m...)
+	}
 	if len(files) == 0 {
-		t.Fatal("no test surface files found")
+		t.Fatal("no bundled or example module QML files found")
 	}
 	str := regexp.MustCompile(`"(\\.|[^"\\])*"`)
 	num := regexp.MustCompile(`(^|[^\w.])(\d+(\.\d+)?)\b`)
@@ -30,7 +34,7 @@ func TestNoMagicNumbersInTestSurface(t *testing.T) {
 				code = code[:idx]
 			}
 			code = str.ReplaceAllString(code, `""`)
-			if strings.Contains(code, "Style.") {
+			if strings.Contains(code, "Style.") || strings.Contains(code, "api.style.") {
 				continue
 			}
 			for _, m := range num.FindAllStringSubmatch(code, -1) {

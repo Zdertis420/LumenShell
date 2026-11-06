@@ -1,0 +1,3 @@
+#!/bin/sh
+cat >/dev/null
+echo '{"ok":true,"protocol":1,"data":{"message":"probe helper ok"}}'

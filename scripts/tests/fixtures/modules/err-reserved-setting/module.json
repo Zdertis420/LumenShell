@@ -1,0 +1,7 @@
+{
+  "id": "err-reserved-setting",
+  "name": "Reserved setting name",
+  "version": "1.0.0",
+  "api": "1.0",
+  "settings": {"enabled": {"type": "boolean", "default": true}}
+}

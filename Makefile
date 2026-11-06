@@ -1,7 +1,7 @@
-PROGRAMS := lumen config palette
+PROGRAMS := lumen config palette modules
 BIN := scripts/bin
 GO_SRC := $(wildcard scripts/src/*/*.go)
-QML := $(shell find . -name '*.qml' -not -path './.claude/*' -not -path './.specify/*')
+QML := $(shell find . -name '*.qml' -not -path './.claude/*' -not -path './.specify/*' -not -path './scripts/tests/fixtures/*')
 
 .PHONY: build run fmt lint test smoke clean
 

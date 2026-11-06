@@ -1,0 +1,13 @@
+{
+  "id": "hello",
+  "name": "Hello",
+  "version": "1.0.0",
+  "api": "1.0",
+  "description": "Shows a greeting window that follows the theme.",
+  "permissions": ["helpers"],
+  "settings": {
+    "greeting": {"type": "string", "default": "Hello", "description": "Text shown in the window"},
+    "size": {"type": "integer", "default": 3, "min": 1, "max": 5, "description": "Window size, 1 (small) to 5 (large)"}
+  },
+  "helpers": [{"name": "hello", "path": "bin/hello"}]
+}

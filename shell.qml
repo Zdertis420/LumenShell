@@ -2,12 +2,11 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "singletons"
-import "testsurface"
 
 ShellRoot {
     id: root
 
-    // True once the startup checks pass; the test surface only appears then.
+    // True once the startup checks pass; modules (including the test surface) load then.
     property bool checksPassed: false
 
     // Compositor-specific check (niri only for now). LUMEN_SKIP_SESSION_CHECK=1 is for tests.
@@ -33,7 +32,8 @@ ShellRoot {
             "backend": Backend.ready,
             "config": Config.ready,
             "theme": Theme.paletteId,
-            "spacing": Style.spacing.md
+            "spacing": Style.spacing.md,
+            "modules": Modules.ready
         });
         if (!checkSession()) {
             fail("not running under niri (NIRI_SOCKET is not set); exiting");
@@ -41,26 +41,24 @@ ShellRoot {
         }
         binariesCheck.running = true;
     }
+    // Once the startup checks pass, find and load the modules.
+    onChecksPassedChanged: {
+        if (checksPassed)
+            Modules.scan();
+
+    }
 
     // The helper programs must be built. Checked without blocking the UI thread.
     Process {
         id: binariesCheck
 
-        command: ["sh", "-c", "test -x \"$1/config\" && test -x \"$1/palette\"", "sh", Backend.helperDir]
+        command: ["sh", "-c", "test -x \"$1/config\" && test -x \"$1/palette\" && test -x \"$1/modules\"", "sh", Backend.helperDir]
         onExited: (exitCode) => {
             if (exitCode === 0)
                 root.checksPassed = true;
             else
                 root.fail("helper programs missing in " + Backend.helperDir + "; run `make build`");
         }
-    }
-
-    LazyLoader {
-        active: root.checksPassed
-
-        TestSurface {
-        }
-
     }
 
 }

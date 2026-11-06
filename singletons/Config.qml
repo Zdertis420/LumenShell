@@ -36,6 +36,11 @@ Singleton {
     // True while the user file does not exist. The watcher cannot see a file that was
     // never there, so a cheap retry runs until it appears.
     property bool fileMissing: false
+    // Definitions of the valid modules: [{id, defaultEnabled, settings}]. They are passed to
+    // the helper on every call so it can validate modules.<id>.* like core keys.
+    property var moduleDefs: []
+    // Callbacks waiting for the next applied result.
+    property var waiters: []
 
     // Emitted after every successfully applied result.
     signal reloaded()
@@ -51,13 +56,26 @@ Singleton {
         return cur;
     }
 
+    // Gives the module definitions (from the Modules singleton) and resolves again.
+    // done() is called after a result that includes them has been applied.
+    function setModules(defs, done) {
+        root.moduleDefs = defs;
+        root.resolve(done);
+    }
+
     // Asks the helper to merge and validate. Safe to call at any time.
-    function resolve() {
+    // done() (optional) is called once a result newer than this call has been applied
+    // (or the helper failed), so callers can rely on `values` being up to date.
+    function resolve(done) {
         const gen = ++root.generation;
+        if (done)
+            root.waiters = root.waiters.concat([done]);
+
         Backend.run("config", ["resolve"], {
             "userFile": root.userFile,
             "dataDir": Backend.dataDir,
-            "themeOverride": root.tempTheme
+            "themeOverride": root.tempTheme,
+            "modules": root.moduleDefs
         }, 0, (req) => {
             if (gen !== root.generation)
                 return ;
@@ -66,7 +84,30 @@ Singleton {
                 root.apply(req.data);
             else
                 root.fallBack(req);
+            root.flush();
         });
+    }
+
+    // A plain copy of a finished helper request (the request itself does not outlive its callback).
+    function snapshot(req) : variant {
+        return {
+            "state": req.state,
+            "helper": req.helper,
+            "data": req.data,
+            "error": req.error
+        };
+    }
+
+    function flush() {
+        const list = root.waiters;
+        root.waiters = [];
+        for (const w of list) {
+            try {
+                w();
+            } catch (e) {
+                Log.error("config callback threw: " + e);
+            }
+        }
     }
 
     function apply(data) {
@@ -103,13 +144,27 @@ Singleton {
         return Backend.run("config", ["set"], {
             "userFile": root.userFile,
             "dataDir": Backend.dataDir,
+            "modules": root.moduleDefs,
             "changes": changes
         }, 0, (req) => {
-            if (req.state === "ok")
-                root.resolve();
+            // Report after the new state has been applied, not just written. The request
+            // object is destroyed right after this callback returns, so keep a copy.
+            const result = root.snapshot(req);
+            root.afterWrite(result, callback);
+        });
+    }
 
+    // Runs callback(result) once a successful write has been applied (or right away on failure).
+    function afterWrite(result, callback) {
+        if (result.state !== "ok") {
             if (callback)
-                callback(req);
+                callback(result);
+
+            return ;
+        }
+        root.resolve(() => {
+            if (callback)
+                callback(result);
 
         });
     }
@@ -126,14 +181,10 @@ Singleton {
         return Backend.run("config", ["unset"], {
             "userFile": root.userFile,
             "dataDir": Backend.dataDir,
+            "modules": root.moduleDefs,
             "keys": keys
         }, 0, (req) => {
-            if (req.state === "ok")
-                root.resolve();
-
-            if (callback)
-                callback(req);
-
+            root.afterWrite(root.snapshot(req), callback);
         });
     }
 

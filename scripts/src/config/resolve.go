@@ -63,6 +63,7 @@ func runResolve(in map[string]any) {
 		return
 	}
 
+	rs := newRuleSet(in["modules"])
 	errs := []configError{}
 	user, problem := readUserFile(userFile)
 	if problem != "" {
@@ -73,7 +74,7 @@ func runResolve(in map[string]any) {
 	// Validate the user layer key by key. Invalid keys are dropped and reported,
 	// so they fall back to the layer below.
 	valid := map[string]any{}
-	for _, r := range rules {
+	for _, r := range rs.rules {
 		v, present := getPath(user, r.key)
 		if !present {
 			// A non-object parent hides the key; report the parent once.
@@ -86,7 +87,11 @@ func runResolve(in map[string]any) {
 		}
 		setPath(valid, r.key, v)
 	}
-	for _, parent := range []string{"theme", "log", "helper"} {
+	parents := []string{"theme", "log", "helper"}
+	if len(rs.modules) > 0 {
+		parents = append(parents, "modules")
+	}
+	for _, parent := range parents {
 		if v, present := user[parent]; present {
 			if _, isObj := v.(map[string]any); !isObj {
 				errs = append(errs, configError{Key: parent, Problem: "must be an object", Fallback: "defaults"})
@@ -94,10 +99,20 @@ func runResolve(in map[string]any) {
 			}
 		}
 	}
+	// A known module's entry must be an object, too.
+	for _, m := range rs.modules {
+		if v, present := getPath(user, "modules."+m.id); present {
+			if _, isObj := v.(map[string]any); !isObj {
+				key := "modules." + m.id
+				errs = append(errs, configError{Key: key, Problem: "must be an object", Fallback: "defaults"})
+				logf("warn", key+": must be an object", map[string]any{"key": key})
+			}
+		}
+	}
 
 	sources := map[string]string{}
 	overrides := map[string]string{} // key -> "user" or "temp"
-	for _, r := range rules {
+	for _, r := range rs.rules {
 		sources[r.key] = "default"
 		if _, ok := getPath(valid, r.key); ok {
 			overrides[r.key] = "user"
@@ -109,7 +124,7 @@ func runResolve(in map[string]any) {
 		if themeOverride == "wallpaper" {
 			setPath(valid, "theme.source", "wallpaper")
 		} else {
-			if p := findRule("theme.preset").check(themeOverride, dataDir); p != "" {
+			if p := rs.find("theme.preset").check(themeOverride, dataDir); p != "" {
 				fail("invalid_theme", "unknown theme %q: %s", themeOverride, p)
 				return
 			}
@@ -120,7 +135,7 @@ func runResolve(in map[string]any) {
 		overrides["theme.source"] = "temp"
 	}
 
-	values := defaultsTree()
+	values := rs.defaultsTree()
 
 	// Layer 2: the selected preset supplies its mode.
 	source := getString(values, valid, "theme.source")

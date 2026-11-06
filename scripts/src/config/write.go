@@ -75,6 +75,7 @@ func runSet(in map[string]any) {
 		return
 	}
 
+	rs := newRuleSet(in["modules"])
 	type change struct {
 		key   string
 		value any
@@ -88,7 +89,7 @@ func runSet(in map[string]any) {
 			fail("bad_input", "changes[%d] needs a key and a value", i)
 			return
 		}
-		r := findRule(key)
+		r := rs.find(key)
 		if r == nil {
 			fail("invalid_key", "unknown key %q", key)
 			return

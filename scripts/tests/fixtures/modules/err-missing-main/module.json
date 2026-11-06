@@ -1,0 +1,7 @@
+{
+  "id": "err-missing-main",
+  "name": "Missing main",
+  "version": "1.0.0",
+  "api": "1.0",
+  "main": "Nope.qml"
+}

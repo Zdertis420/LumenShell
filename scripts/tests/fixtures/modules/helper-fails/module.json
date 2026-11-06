@@ -1,0 +1,8 @@
+{
+  "id": "helper-fails",
+  "name": "Failing helper",
+  "version": "1.0.0",
+  "api": "1.0",
+  "permissions": ["helpers"],
+  "helpers": [{"name": "h", "path": "bin/h"}]
+}

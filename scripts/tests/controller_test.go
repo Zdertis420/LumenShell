@@ -26,7 +26,7 @@ func fakeQS(t *testing.T, extra ...string) (dir string, env []string) {
 	}
 	// Fake helper programs so `start` finds them.
 	helperDir := env[len(env)-1][len("LUMEN_HELPER_DIR="):]
-	for _, name := range []string{"config", "palette"} {
+	for _, name := range []string{"config", "palette", "modules"} {
 		if err := os.WriteFile(filepath.Join(helperDir, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}

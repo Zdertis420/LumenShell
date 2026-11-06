@@ -1,0 +1,6 @@
+{
+  "id": "err-bad-api",
+  "name": "Bad api",
+  "version": "1.0.0",
+  "api": "one"
+}

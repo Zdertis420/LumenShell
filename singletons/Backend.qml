@@ -45,10 +45,13 @@ Singleton {
 
     // Runs `program args...` with `input` (a JS value) as JSON on stdin.
     // callback(request) is called once when the run ends; the request is also returned
-    // and emits finished(request). request.state: "ok" | "failed" | "timeout".
-    function run(program: string, args, input, timeoutMs: int, callback) {
+    // and emits finished(request). request.state: "ok" | "failed" | "timeout" | "cancelled".
+    // tag (optional) names the owner of the run, for example "module:hello"; it appears in
+    // error messages and keys lastErrors. request.cancel() kills the process silently.
+    function run(program: string, args, input, timeoutMs: int, callback, tag) {
         const limit = timeoutMs > 0 ? timeoutMs : defaultTimeoutMs;
         const req = requestComponent.createObject(root, {
+            "tag": tag ? tag : "",
             "helper": program.indexOf("/") >= 0 ? program.split("/").pop() : program,
             "command": [helperPath(program)].concat(args ? args : []),
             "inputText": JSON.stringify(input === undefined ? {
@@ -65,16 +68,17 @@ Singleton {
         if (req.state === "ok")
             return ;
 
+        const owner = req.tag ? req.tag + ":" : "";
         const copy = Object.assign({
         }, root.lastErrors);
-        copy[req.helper] = {
+        copy[owner + req.helper] = {
             "message": req.error ? req.error.message : "unknown error",
             "code": req.error ? req.error.code : "",
             "state": req.state,
             "time": new Date().toISOString()
         };
         root.lastErrors = copy;
-        Log.error("helper " + req.helper + " " + req.state + ": " + (req.error ? req.error.message : ""), {
+        Log.error((req.tag ? req.tag + " " : "") + "helper " + req.helper + " " + req.state + ": " + (req.error ? req.error.message : ""), {
             "helper": req.helper,
             "state": req.state
         });
@@ -99,6 +103,39 @@ Singleton {
         if (root.commandSeq === seq)
             root.commandStatus = "failed " + seq + ": " + (invalid ? "invalid: " : "") + message;
 
+    }
+
+    // Returns an error reply for a bad or unknown module id, or "" when the id is fine.
+    function checkModuleId(id: string) : string {
+        if (!/^[a-z][a-z0-9-]{1,31}$/.test(id) && !/^dir:[A-Za-z0-9._-]{1,64}$/.test(id))
+            return "error: invalid: invalid module id '" + id + "'";
+
+        if (Modules.find(id) === null)
+            return "error: unknown: unknown module '" + id + "'";
+
+        return "";
+    }
+
+    // Starts a queued module command for a known id: run(seq) does the work.
+    function queueModule(id: string, run) : string {
+        const bad = root.checkModuleId(id);
+        if (bad)
+            return bad;
+
+        const seq = root.beginCommand();
+        run(seq);
+        return "queued " + seq;
+    }
+
+    // result: {ok, unknown, message}. The status is set only after the module settled.
+    function endModuleCommand(seq: int, result) {
+        if (root.commandSeq !== seq)
+            return ;
+
+        if (result.ok)
+            root.commandStatus = "done " + seq;
+        else
+            root.commandStatus = "failed " + seq + ": " + (result.unknown ? "unknown: " : "") + (result.message ?? "the command failed");
     }
 
     function themeKeys(theme: string) : variant {
@@ -151,6 +188,8 @@ Singleton {
     }
 
     IpcHandler {
+        // ---- modules (see specs/002-modules/contracts/ipc-modules.md) ----
+
         function version() : string {
             return root.protocolVersion;
         }
@@ -185,6 +224,58 @@ Singleton {
             return "queued " + root.queueReset();
         }
 
+        function modulesList() : string {
+            return JSON.stringify({
+                "attribution": Modules.attribution,
+                "modules": Modules.list.map((rec) => {
+                    return Modules.summaryOf(rec);
+                })
+            });
+        }
+
+        function moduleShow(id: string) : string {
+            const bad = root.checkModuleId(id);
+            if (bad)
+                return bad;
+
+            return JSON.stringify(Modules.detailOf(Modules.find(id)));
+        }
+
+        function moduleEnable(id: string) : string {
+            return root.queueModule(id, (seq) => {
+                Modules.setEnabled(id, true, (result) => {
+                    return root.endModuleCommand(seq, result);
+                });
+            });
+        }
+
+        function moduleDisable(id: string) : string {
+            return root.queueModule(id, (seq) => {
+                Modules.setEnabled(id, false, (result) => {
+                    return root.endModuleCommand(seq, result);
+                });
+            });
+        }
+
+        function moduleReload(id: string) : string {
+            return root.queueModule(id, (seq) => {
+                Modules.reload(id, (result) => {
+                    return root.endModuleCommand(seq, result);
+                });
+            });
+        }
+
+        function modulesRescan() : string {
+            const seq = root.beginCommand();
+            Modules.scan((ok) => {
+                return root.endModuleCommand(seq, {
+                    "ok": ok,
+                    "message": "the module scan failed"
+                });
+            });
+            return "queued " + seq;
+        }
+
         target: "lumen"
     }
 
@@ -195,6 +286,8 @@ Singleton {
             id: req
 
             property string helper: ""
+            // Owner of the run, for example "module:hello" (empty for Lumen's own runs).
+            property string tag: ""
             property var command: []
             property string inputText: "{}"
             property int timeoutMs: 3000
@@ -210,6 +303,22 @@ Singleton {
             property int exitCode: 0
 
             signal finished(var request)
+
+            // Kills the process without calling the callback or emitting any signal.
+            // Used when the owner (for example a module) goes away.
+            function cancel() {
+                if (req.finishedFlag)
+                    return ;
+
+                req.finishedFlag = true;
+                timer.stop();
+                req.callback = null;
+                req.state = "cancelled";
+                proc.signal(9);
+                Qt.callLater(() => {
+                    return req.destroy();
+                });
+            }
 
             function start() {
                 req.startedAt = Date.now();

@@ -26,6 +26,7 @@ One-shot. Exits after the command completes. Never stays resident. Single file, 
 | 4 | `start`: a shell is already running |
 | 5 | Protocol version mismatch with the running shell |
 | 6 | The shell failed the command (replies starting `error: failed:` or a `failed` status; message on stderr) |
+| 7 | Unknown module id (module commands only; see `specs/002-modules/contracts/cli-modules.md`) |
 | 8 | Environment problem (not under niri, `qs` missing, or `scripts/bin/config` / `scripts/bin/palette` missing: "run `make build`") |
 | 9 | Command timed out (default 5 s, including the status poll) |
 

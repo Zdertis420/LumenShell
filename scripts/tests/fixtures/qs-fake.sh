@@ -51,6 +51,33 @@ ipc)
 		fi
 		echo "${FAKE_QS_REPLY:-queued 7}"
 		;;
+	modulesList)
+		# FAKE_QS_MODULES_LIST holds the JSON reply.
+		if [ -n "$FAKE_QS_MODULES_LIST" ]; then
+			echo "$FAKE_QS_MODULES_LIST"
+		else
+			echo '{"attribution":"active","modules":[]}'
+		fi
+		;;
+	moduleShow)
+		id="$5"
+		if [ -n "$FAKE_QS_MODULES_DIR" ] && [ -f "$FAKE_QS_MODULES_DIR/$id.json" ]; then
+			cat "$FAKE_QS_MODULES_DIR/$id.json"
+		else
+			echo "error: unknown: unknown module '$id'"
+		fi
+		;;
+	moduleEnable | moduleDisable | moduleReload | modulesRescan)
+		id="$5"
+		if [ "$fn" != "modulesRescan" ] && [ -n "$FAKE_QS_MODULES_DIR" ] && [ ! -f "$FAKE_QS_MODULES_DIR/$id.json" ]; then
+			echo "error: unknown: unknown module '$id'"
+		else
+			if [ "$FAKE_QS_HANG" = "1" ]; then
+				sleep 30
+			fi
+			echo "${FAKE_QS_REPLY:-queued 7}"
+		fi
+		;;
 	status)
 		seq="${FAKE_QS_STATUS:-pending 7,done 7}"
 		n=0

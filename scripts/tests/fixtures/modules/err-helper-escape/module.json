@@ -1,0 +1,7 @@
+{
+  "id": "err-helper-escape",
+  "name": "Helper path escapes",
+  "version": "1.0.0",
+  "api": "1.0",
+  "helpers": [{"name": "h", "path": "../x"}]
+}

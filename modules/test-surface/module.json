@@ -1,0 +1,8 @@
+{
+  "id": "test-surface",
+  "name": "Test surface",
+  "version": "1.0.0",
+  "api": "1.0",
+  "description": "Shows the theme, configuration, module list, design tokens, and recent log lines. For verification only.",
+  "permissions": ["config.read", "log.read"]
+}

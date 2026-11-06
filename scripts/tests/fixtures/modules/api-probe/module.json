@@ -1,0 +1,12 @@
+{
+  "id": "api-probe",
+  "name": "API probe",
+  "version": "1.0.0",
+  "api": "1.0",
+  "permissions": ["helpers", "config.read", "log.read"],
+  "settings": {
+    "greeting": {"type": "string", "default": "hi"},
+    "size": {"type": "integer", "default": 3, "min": 1, "max": 5}
+  },
+  "helpers": [{"name": "probe", "path": "bin/probe"}]
+}

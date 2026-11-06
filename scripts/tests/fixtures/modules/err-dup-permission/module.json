@@ -1,0 +1,7 @@
+{
+  "id": "err-dup-permission",
+  "name": "Duplicate permission",
+  "version": "1.0.0",
+  "api": "1.0",
+  "permissions": ["helpers", "helpers"]
+}

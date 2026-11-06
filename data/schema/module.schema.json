@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://lumen.invalid/schema/module.schema.json",
+  "title": "Lumen module manifest (module.json), module interface 1.0",
+  "description": "Unknown top-level fields are allowed and reported as warnings. The fields extensionPoints, contributions and requires are reserved: accepted, ignored, and reported as a warning. Rules that JSON Schema cannot express (duplicate ids, interface compatibility, file existence, helper paths) are checked by the modules program.",
+  "type": "object",
+  "required": ["id", "name", "version", "api"],
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,31}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "api": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "main": {
+      "type": "string",
+      "pattern": "^[^/].*\\.qml$",
+      "default": "Main.qml"
+    },
+    "permissions": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["helpers", "config.read", "config.write", "log.read", "modules.read-settings", "network"]
+      }
+    },
+    "settings": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]{0,31}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type", "default"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["string", "integer", "number", "boolean"]
+          },
+          "default": {},
+          "enum": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "min": {"type": "number"},
+          "max": {"type": "number"},
+          "description": {
+            "type": "string",
+            "maxLength": 160
+          }
+        }
+      }
+    },
+    "helpers": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["name", "path"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,31}$"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "extensionPoints": {},
+    "contributions": {},
+    "requires": {}
+  }
+}

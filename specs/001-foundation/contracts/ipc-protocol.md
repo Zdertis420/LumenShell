@@ -23,6 +23,10 @@ All functions return a string immediately. A Quickshell `IpcHandler` function re
 2. Poll `status()` every 50 ms for up to 2 s until it reports `done <seq>` or `failed <seq>: ...`.
 3. Map the outcome to an exit code (see [cli.md](cli.md)). A poll timeout is exit 9.
 
+## Module commands
+
+Feature 002 adds the functions `modulesList`, `moduleShow`, `moduleEnable`, `moduleDisable`, `moduleReload`, and `modulesRescan` to this target, and the error prefix `error: unknown:`. Adding functions is a compatible change, so `version()` still returns `"1"`. See `specs/002-modules/contracts/ipc-modules.md`.
+
 ## Rules
 
 - Error replies are `error: invalid: <message>` for bad input (controller exit 2) and `error: failed: <message>` for runtime failures (controller exit 6). A `failed <seq>: ...` status maps to exit 6.

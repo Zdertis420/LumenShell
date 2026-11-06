@@ -1,0 +1,3 @@
+#!/bin/sh
+# Never finishes.
+exec sleep 600

@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	binDir = tmp
-	for _, name := range []string{"lumen", "config", "palette"} {
+	for _, name := range []string{"lumen", "config", "palette", "modules"} {
 		srcs, _ := filepath.Glob(filepath.Join(repoRoot, "scripts", "src", name, "*.go"))
 		args := append([]string{"build", "-o", filepath.Join(binDir, name)}, srcs...)
 		cmd := exec.Command("go", args...)
@@ -101,6 +101,13 @@ func parseEnvelope(t *testing.T, r result) envelope {
 		t.Fatalf("protocol = %d, want 1", e.Protocol)
 	}
 	return e
+}
+
+// runModules runs `modules <subcommand>` with the input as JSON and parses the envelope.
+func runModules(t *testing.T, subcommand string, input map[string]any) (envelope, result) {
+	t.Helper()
+	r := runProgram("modules", mustJSON(input), nil, subcommand)
+	return parseEnvelope(t, r), r
 }
 
 func mustJSON(v any) string {

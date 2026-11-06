@@ -1,0 +1,5 @@
+#!/bin/sh
+# Example helper program: reads one JSON object on stdin, writes one response document
+# on stdout. Real helpers do the heavy work here (parsing, filtering, ...), not in QML.
+cat >/dev/null
+echo '{"ok":true,"protocol":1,"data":{"message":"hello from the helper"}}'

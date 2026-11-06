@@ -1,0 +1,7 @@
+{
+  "id": "err-bad-setting-default",
+  "name": "Bad setting default",
+  "version": "1.0.0",
+  "api": "1.0",
+  "settings": {"n": {"type": "integer", "default": "x"}}
+}

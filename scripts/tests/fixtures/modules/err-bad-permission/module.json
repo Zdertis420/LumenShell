@@ -1,0 +1,7 @@
+{
+  "id": "err-bad-permission",
+  "name": "Bad permission",
+  "version": "1.0.0",
+  "api": "1.0",
+  "permissions": ["root"]
+}

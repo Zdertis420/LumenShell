@@ -2,12 +2,12 @@
 
 Lumen Shell is a desktop environment shell for [niri](https://github.com/YaLTeR/niri), built with [Quickshell](https://quickshell.org).
 
-This repository is at the **Foundation** stage: the project layout, the five core singletons (Config, Theme, Style, Backend, Log), a one-shot `lumen` controller, and a minimal test surface. It has no end-user components yet.
+This repository has the project layout, the core singletons (Config, Theme, Style, Backend, Log, and the Modules registry), a one-shot `lumen` controller, the module system, and a minimal test surface (which is itself a module). It has no end-user components yet.
 
 ## Quick start
 
 ```text
-make build          # builds scripts/bin/{lumen,config,palette}
+make build          # builds scripts/bin/{lumen,config,palette,modules}
 scripts/bin/lumen start
 ```
 
@@ -22,6 +22,21 @@ scripts/bin/lumen theme --reset              # remove the saved choice
 ```
 
 To start Lumen with your session, run `lumen start` from a niri startup entry or a systemd user unit. Lumen does not restart a crashed shell; your session does.
+
+## Modules
+
+Every part of Lumen is a module: a directory with a `module.json` manifest and a QML entry file. Bundled modules live in `modules/` and load automatically. Modules you add yourself go in `~/.local/share/lumen/modules/`; they are listed with their permissions but stay off until you enable them.
+
+```text
+scripts/bin/lumen modules list            # what is there, and in which state
+scripts/bin/lumen modules show hello      # details, permissions, settings, errors
+scripts/bin/lumen modules enable hello    # load it now and after restarts
+scripts/bin/lumen modules disable hello
+scripts/bin/lumen modules reload hello    # re-read a module after you edited it
+scripts/bin/lumen modules rescan          # look for new module directories
+```
+
+A broken module only breaks itself: it is listed as `failed` with the reason. Modules run inside the shell with its privileges; permissions are shown, not a sandbox. To write one, follow [docs/writing-a-module.md](docs/writing-a-module.md) and copy `examples/hello-module/`. The interface is described in [docs/module-api.md](docs/module-api.md).
 
 ## Commands
 
@@ -38,12 +53,12 @@ To start Lumen with your session, run `lumen start` from a niri startup entry or
 
 ```text
 shell.qml          Quickshell entry point (qs -p .)
-singletons/        Config, Theme, Style, Backend, Log (QML singletons)
-testsurface/       Minimal surface for verification only
-modules/           Reserved for later features
-data/              Presets, fallback palette, config schema
+singletons/        Config, Theme, Style, Backend, Log, Modules (QML singletons)
+modules/           Bundled modules (the test surface is the first one)
+examples/          Example module to copy (hello-module)
+data/              Presets, fallback palette, config and manifest schemas
 scripts/
-├── src/           One directory per Go program (lumen, config, palette)
+├── src/           One directory per Go program (lumen, config, palette, modules)
 ├── bin/           Build output (git-ignored)
 └── tests/         Black-box tests, smoke test, fixtures
 docs/              Layout, dependencies, development notes

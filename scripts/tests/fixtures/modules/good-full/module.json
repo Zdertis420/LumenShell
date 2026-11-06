@@ -1,0 +1,16 @@
+{
+  "id": "good-full",
+  "name": "Good full",
+  "version": "1.2.3",
+  "api": "1.0",
+  "description": "Uses every manifest field.",
+  "main": "Main.qml",
+  "permissions": ["helpers", "config.read"],
+  "settings": {
+    "mode": {"type": "string", "default": "one", "enum": ["one", "two"], "description": "A choice"},
+    "count": {"type": "integer", "default": 3, "min": 1, "max": 5},
+    "ratio": {"type": "number", "default": 0.5, "min": 0, "max": 1},
+    "flag": {"type": "boolean", "default": false}
+  },
+  "helpers": [{"name": "hello", "path": "bin/hello"}]
+}

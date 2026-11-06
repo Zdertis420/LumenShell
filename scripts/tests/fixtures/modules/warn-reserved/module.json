@@ -1,0 +1,10 @@
+{
+  "id": "warn-reserved",
+  "name": "Reserved fields",
+  "version": "1.0.0",
+  "api": "1.0",
+  "extensionPoints": ["widgets"],
+  "contributions": {"bar": "Widget.qml"},
+  "requires": ["good-min"],
+  "somethingFromTheFuture": 1
+}

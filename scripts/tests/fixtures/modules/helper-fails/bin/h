@@ -1,0 +1,5 @@
+#!/bin/sh
+# Fails on purpose: writes a structured diagnostic and exits non-zero.
+cat >/dev/null
+printf '{"time":"2026-01-01T00:00:00.000Z","level":"error","source":"helper:fixture","msg":"fixture helper failing on purpose"}\n' >&2
+exit 3

@@ -1,0 +1,7 @@
+{
+  "id": "err-main-escape",
+  "name": "Main escapes the directory",
+  "version": "1.0.0",
+  "api": "1.0",
+  "main": "../good-min/Main.qml"
+}

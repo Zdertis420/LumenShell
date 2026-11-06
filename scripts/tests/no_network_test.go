@@ -31,7 +31,7 @@ func TestNoNetworkInGoPrograms(t *testing.T) {
 
 func TestNoNetworkInQML(t *testing.T) {
 	var files []string
-	for _, pattern := range []string{"shell.qml", "singletons/*.qml", "testsurface/*.qml", "modules/*/*.qml"} {
+	for _, pattern := range []string{"shell.qml", "singletons/*.qml", "modules/*/*.qml", "examples/*/*.qml"} {
 		m, _ := filepath.Glob(filepath.Join(repoRoot, pattern))
 		files = append(files, m...)
 	}

@@ -18,9 +18,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 )
 
@@ -34,6 +36,7 @@ const (
 	exitAlreadyRunning = 4
 	exitProtocol       = 5
 	exitShellFailed    = 6
+	exitUnknownModule  = 7
 	exitEnv            = 8
 	exitTimeout        = 9
 
@@ -79,7 +82,14 @@ func run(ctx context.Context, args []string) int {
 	// Validate arguments before touching the system.
 	var theme string
 	var temp, reset bool
+	var sub, modID string
 	switch cmd {
+	case "modules":
+		var f *failure
+		sub, modID, f = parseModules(rest)
+		if f != nil {
+			return report(f)
+		}
 	case "start", "version":
 		if len(rest) != 0 {
 			return report(fail(exitUsage, "%s takes no arguments", cmd))
@@ -109,12 +119,15 @@ func run(ctx context.Context, args []string) int {
 		f = c.version()
 	case "theme":
 		f = c.theme(theme, temp, reset)
+	case "modules":
+		f = c.modules(sub, modID)
 	}
 	return report(f)
 }
 
 func usage() string {
-	return "usage: lumen start | lumen theme <theme> [--temp] | lumen theme --reset | lumen version"
+	return "usage: lumen start | lumen theme <theme> [--temp] | lumen theme --reset | lumen version |\n" +
+		"       lumen modules list | show <id> | enable <id> | disable <id> | reload <id> | rescan"
 }
 
 func report(f *failure) int {
@@ -253,7 +266,7 @@ func checkHelpers(root string) *failure {
 	if dir == "" {
 		dir = filepath.Join(root, "scripts", "bin")
 	}
-	for _, name := range []string{"config", "palette"} {
+	for _, name := range []string{"config", "palette", "modules"} {
 		st, err := os.Stat(filepath.Join(dir, name))
 		if err != nil || st.IsDir() || st.Mode()&0o111 == 0 {
 			return fail(exitEnv, "helper program %q is missing in %s; run `make build`", name, dir)
@@ -339,6 +352,8 @@ func (c *controller) theme(theme string, temp, reset bool) *failure {
 // finish interprets the shell's reply and, for queued work, waits for the outcome.
 func (c *controller) finish(reply string) *failure {
 	switch {
+	case strings.HasPrefix(reply, "error: unknown:"):
+		return fail(exitUnknownModule, "%s", strings.TrimSpace(strings.TrimPrefix(reply, "error: unknown:")))
 	case strings.HasPrefix(reply, "error: invalid:"):
 		return fail(exitUsage, "%s", strings.TrimSpace(strings.TrimPrefix(reply, "error: invalid:")))
 	case strings.HasPrefix(reply, "error: failed:"):
@@ -380,6 +395,9 @@ func (c *controller) wait(seq int) *failure {
 			if rest, ok := strings.CutPrefix(msg, "invalid:"); ok {
 				return fail(exitUsage, "%s", strings.TrimSpace(rest))
 			}
+			if rest, ok := strings.CutPrefix(msg, "unknown:"); ok {
+				return fail(exitUnknownModule, "%s", strings.TrimSpace(rest))
+			}
 			return fail(exitShellFailed, "%s", msg)
 		case kind == "unknown":
 			return fail(exitShellFailed, "unexpected status from the shell: %q", st)
@@ -414,6 +432,279 @@ func parseStatus(s string) (kind string, seq int, msg string) {
 		return kind, n, strings.TrimSpace(rest)
 	}
 	return "unknown", 0, ""
+}
+
+// ---- lumen modules ... ----
+
+var (
+	moduleIDPattern    = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
+	moduleDirIDPattern = regexp.MustCompile(`^dir:[A-Za-z0-9._-]{1,64}$`)
+)
+
+const modulesUsage = "usage: lumen modules list | show <id> | enable <id> | disable <id> | reload <id> | rescan"
+
+// parseModules validates the arguments of `lumen modules ...` before anything is contacted.
+func parseModules(args []string) (sub, id string, f *failure) {
+	if len(args) == 0 {
+		return "", "", fail(exitUsage, "modules needs a subcommand\n%s", modulesUsage)
+	}
+	sub = args[0]
+	switch sub {
+	case "list", "rescan":
+		if len(args) != 1 {
+			return "", "", fail(exitUsage, "modules %s takes no arguments", sub)
+		}
+		return sub, "", nil
+	case "show", "enable", "disable", "reload":
+		if len(args) != 2 {
+			return "", "", fail(exitUsage, "modules %s needs exactly one module id", sub)
+		}
+		id = args[1]
+		if !moduleIDPattern.MatchString(id) && !moduleDirIDPattern.MatchString(id) {
+			return "", "", fail(exitUsage, "invalid module id %q", id)
+		}
+		return sub, id, nil
+	}
+	return "", "", fail(exitUsage, "unknown modules subcommand %q\n%s", sub, modulesUsage)
+}
+
+func (c *controller) modules(sub, id string) *failure {
+	if f := c.connect(); f != nil {
+		return f
+	}
+	switch sub {
+	case "list":
+		return c.modulesList()
+	case "show":
+		return c.modulesShow(id)
+	case "rescan":
+		reply, f := c.callChecked("modulesRescan")
+		if f != nil {
+			return f
+		}
+		if f := c.finish(reply); f != nil {
+			return f
+		}
+		fmt.Println("rescanned the module directories")
+		return nil
+	}
+
+	fn := map[string]string{"enable": "moduleEnable", "disable": "moduleDisable", "reload": "moduleReload"}[sub]
+	reply, f := c.callChecked(fn, id)
+	if f != nil {
+		return f
+	}
+	if f := c.finish(reply); f != nil {
+		return f
+	}
+	if sub == "disable" {
+		fmt.Printf("%s: disabled\n", id)
+		return nil
+	}
+	// The command reports "done" only after the module's state has settled, so this is final.
+	detail, f := c.moduleDetail(id)
+	if f != nil {
+		return f
+	}
+	state, _ := detail["state"].(string)
+	fmt.Printf("%s: %s\n", id, state)
+	if state == "failed" {
+		msg, _ := detail["lastError"].(string)
+		if msg == "" {
+			msg = "the module failed"
+		}
+		return fail(exitShellFailed, "%s: %s", id, msg)
+	}
+	return nil
+}
+
+// callChecked runs one IPC function and turns transport problems into failures.
+func (c *controller) callChecked(fn string, args ...string) (string, *failure) {
+	reply, errOut, err := c.call(fn, args...)
+	if c.ctx.Err() != nil {
+		return "", fail(exitTimeout, "the shell did not answer in time")
+	}
+	if err != nil {
+		return "", fail(exitShellFailed, "the shell rejected the command: %v %s", err, errOut)
+	}
+	return reply, nil
+}
+
+func (c *controller) moduleDetail(id string) (map[string]any, *failure) {
+	reply, f := c.callChecked("moduleShow", id)
+	if f != nil {
+		return nil, f
+	}
+	if strings.HasPrefix(reply, "error:") {
+		return nil, c.finish(reply)
+	}
+	var detail map[string]any
+	if err := json.Unmarshal([]byte(reply), &detail); err != nil {
+		return nil, fail(exitShellFailed, "unexpected reply from the shell: %q", reply)
+	}
+	return detail, nil
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+func (c *controller) modulesList() *failure {
+	reply, f := c.callChecked("modulesList")
+	if f != nil {
+		return f
+	}
+	if strings.HasPrefix(reply, "error:") {
+		return c.finish(reply)
+	}
+	var list struct {
+		Attribution string `json:"attribution"`
+		Modules     []struct {
+			ID            string   `json:"id"`
+			Version       string   `json:"version"`
+			Origin        string   `json:"origin"`
+			State         string   `json:"state"`
+			Permissions   []string `json:"permissions"`
+			RuntimeErrors int      `json:"runtimeErrors"`
+			LastError     string   `json:"lastError"`
+			Warnings      []any    `json:"warnings"`
+		} `json:"modules"`
+	}
+	if err := json.Unmarshal([]byte(reply), &list); err != nil {
+		return fail(exitShellFailed, "unexpected reply from the shell: %q", reply)
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tVERSION\tORIGIN\tSTATE\tNOTES")
+	for _, m := range list.Modules {
+		var notes []string
+		switch m.State {
+		case "failed":
+			if m.LastError != "" {
+				notes = append(notes, m.LastError)
+			}
+		case "disabled":
+			if len(m.Permissions) > 0 {
+				notes = append(notes, "permissions: "+strings.Join(m.Permissions, ", "))
+			}
+		}
+		if m.State != "failed" && m.RuntimeErrors > 0 {
+			notes = append(notes, plural(m.RuntimeErrors, "runtime error", "runtime errors"))
+		}
+		if len(m.Warnings) > 0 {
+			notes = append(notes, plural(len(m.Warnings), "warning", "warnings"))
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", m.ID, m.Version, m.Origin, m.State, strings.Join(notes, "; "))
+	}
+	w.Flush()
+	if list.Attribution == "degraded" {
+		fmt.Println("note: runtime errors of modules are not being counted (the shell cannot follow its own log)")
+	}
+	return nil
+}
+
+// problemText formats a warning or error that is either a string or {field, problem}.
+func problemText(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case map[string]any:
+		field, _ := x["field"].(string)
+		problem, _ := x["problem"].(string)
+		if field != "" {
+			return field + ": " + problem
+		}
+		return problem
+	}
+	return fmt.Sprint(v)
+}
+
+func str(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return s
+}
+
+func (c *controller) modulesShow(id string) *failure {
+	d, f := c.moduleDetail(id)
+	if f != nil {
+		return f
+	}
+	fmt.Printf("id: %s\n", str(d, "id"))
+	fmt.Printf("name: %s\n", str(d, "name"))
+	fmt.Printf("version: %s\n", str(d, "version"))
+	if desc := str(d, "description"); desc != "" {
+		fmt.Printf("description: %s\n", desc)
+	}
+	fmt.Printf("origin: %s\n", str(d, "origin"))
+	fmt.Printf("directory: %s\n", str(d, "dir"))
+	enabled, _ := d["enabled"].(bool)
+	def, _ := d["defaultEnabled"].(bool)
+	fmt.Printf("state: %s (enabled: %v, default: %v)\n", str(d, "state"), enabled, def)
+	fmt.Printf("interface: requires %s, Lumen provides %s\n", str(d, "apiRequired"), str(d, "apiProvided"))
+	perms := []string{}
+	for _, p := range anyList(d["permissions"]) {
+		perms = append(perms, fmt.Sprint(p))
+	}
+	if len(perms) == 0 {
+		fmt.Println("permissions: none")
+	} else {
+		fmt.Printf("permissions: %s\n", strings.Join(perms, ", "))
+	}
+	helpers := []string{}
+	for _, h := range anyList(d["helpers"]) {
+		helpers = append(helpers, fmt.Sprint(h))
+	}
+	if len(helpers) > 0 {
+		fmt.Printf("helpers: %s\n", strings.Join(helpers, ", "))
+	}
+
+	settings, _ := d["settings"].(map[string]any)
+	values, _ := d["settingValues"].(map[string]any)
+	if len(settings) > 0 {
+		fmt.Println("settings:")
+		keys := make([]string, 0, len(settings))
+		for k := range settings {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			rule, _ := settings[k].(map[string]any)
+			value, ok := values[k]
+			if !ok {
+				// Not resolved yet (for example the module is not loaded): the default applies.
+				value = rule["default"]
+			}
+			fmt.Printf("  %s: %v (%s, default %v)\n", k, value, str(rule, "type"), rule["default"])
+		}
+	}
+	printList := func(title string, items []any, format func(any) string) {
+		if len(items) == 0 {
+			return
+		}
+		fmt.Println(title + ":")
+		for _, it := range items {
+			fmt.Println("  " + format(it))
+		}
+	}
+	printList("errors", anyList(d["errors"]), problemText)
+	printList("warnings", anyList(d["warnings"]), problemText)
+	printList("setting errors", anyList(d["settingErrors"]), func(v any) string {
+		m, _ := v.(map[string]any)
+		return fmt.Sprintf("%s: %s (fallback: %v)", str(m, "key"), str(m, "problem"), m["fallback"])
+	})
+	runtime, _ := d["runtimeErrors"].(float64)
+	fmt.Printf("runtime errors: %d\n", int(runtime))
+	if last := str(d, "lastError"); last != "" {
+		fmt.Printf("last error: %s\n", last)
+	}
+	return nil
+}
+
+func anyList(v any) []any {
+	l, _ := v.([]any)
+	return l
 }
 
 // forwardLog sends one entry to the shell's log stream. Best effort: errors are ignored,

@@ -3,3 +3,5 @@ singleton Theme 1.0 Theme.qml
 singleton Style 1.0 Style.qml
 singleton Backend 1.0 Backend.qml
 singleton Log 1.0 Log.qml
+singleton Modules 1.0 Modules.qml
+ModuleApi 1.0 ModuleApi.qml
