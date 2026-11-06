@@ -1,0 +1,23 @@
+{
+  "id": "tokyo-night",
+  "name": "Tokyo Night",
+  "mode": "dark",
+  "roles": {
+    "primary": "#7aa2f7",
+    "onPrimary": "#16161e",
+    "secondary": "#bb9af7",
+    "onSecondary": "#16161e",
+    "tertiary": "#7dcfff",
+    "onTertiary": "#16161e",
+    "error": "#f7768e",
+    "onError": "#16161e",
+    "background": "#1a1b26",
+    "onBackground": "#c0caf5",
+    "surface": "#16161e",
+    "onSurface": "#c0caf5",
+    "surfaceVariant": "#292e42",
+    "onSurfaceVariant": "#a9b1d6",
+    "surfaceContainer": "#1f2335",
+    "outline": "#565f89"
+  }
+}

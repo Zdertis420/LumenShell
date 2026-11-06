@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://lumen.invalid/schema/config.schema.json",
+  "title": "Lumen user configuration",
+  "description": "Only explicit overrides belong in the user file. Unknown keys are allowed and preserved.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "theme": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["wallpaper", "preset"],
+          "default": "preset"
+        },
+        "preset": {
+          "type": "string",
+          "enum": [
+            "tokyo-night",
+            "catppuccin-latte",
+            "catppuccin-frappe",
+            "catppuccin-macchiato",
+            "catppuccin-mocha"
+          ],
+          "default": "catppuccin-mocha"
+        },
+        "scheme": {
+          "type": "string",
+          "enum": [
+            "scheme-content",
+            "scheme-expressive",
+            "scheme-fidelity",
+            "scheme-fruit-salad",
+            "scheme-monochrome",
+            "scheme-neutral",
+            "scheme-rainbow",
+            "scheme-tonal-spot",
+            "scheme-vibrant",
+            "scheme-smart"
+          ],
+          "default": "scheme-tonal-spot"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["light", "dark"],
+          "default": "dark"
+        },
+        "wallpaper": {
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "log": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error"],
+          "default": "info"
+        }
+      }
+    },
+    "helper": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 30000,
+          "default": 3000
+        }
+      }
+    }
+  }
+}

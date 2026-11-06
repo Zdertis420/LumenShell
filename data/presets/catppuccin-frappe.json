@@ -1,0 +1,23 @@
+{
+  "id": "catppuccin-frappe",
+  "name": "Catppuccin Frappé",
+  "mode": "dark",
+  "roles": {
+    "primary": "#8caaee",
+    "onPrimary": "#232634",
+    "secondary": "#ca9ee6",
+    "onSecondary": "#232634",
+    "tertiary": "#81c8be",
+    "onTertiary": "#232634",
+    "error": "#e78284",
+    "onError": "#232634",
+    "background": "#303446",
+    "onBackground": "#c6d0f5",
+    "surface": "#292c3c",
+    "onSurface": "#c6d0f5",
+    "surfaceVariant": "#414559",
+    "onSurfaceVariant": "#b5bfe2",
+    "surfaceContainer": "#51576d",
+    "outline": "#737994"
+  }
+}

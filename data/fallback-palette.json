@@ -1,0 +1,23 @@
+{
+  "id": "fallback",
+  "name": "Fallback",
+  "mode": "dark",
+  "roles": {
+    "primary": "#a8c8ff",
+    "onPrimary": "#00315e",
+    "secondary": "#bcc7dc",
+    "onSecondary": "#263141",
+    "tertiary": "#dabce2",
+    "onTertiary": "#3d2846",
+    "error": "#ffb4ab",
+    "onError": "#690005",
+    "background": "#121316",
+    "onBackground": "#e3e2e6",
+    "surface": "#121316",
+    "onSurface": "#e3e2e6",
+    "surfaceVariant": "#44474e",
+    "onSurfaceVariant": "#c4c6d0",
+    "surfaceContainer": "#1e2022",
+    "outline": "#8e9099"
+  }
+}

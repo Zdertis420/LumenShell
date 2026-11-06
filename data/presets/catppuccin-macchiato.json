@@ -1,0 +1,23 @@
+{
+  "id": "catppuccin-macchiato",
+  "name": "Catppuccin Macchiato",
+  "mode": "dark",
+  "roles": {
+    "primary": "#8aadf4",
+    "onPrimary": "#181926",
+    "secondary": "#c6a0f6",
+    "onSecondary": "#181926",
+    "tertiary": "#8bd5ca",
+    "onTertiary": "#181926",
+    "error": "#ed8796",
+    "onError": "#181926",
+    "background": "#24273a",
+    "onBackground": "#cad3f5",
+    "surface": "#1e2030",
+    "onSurface": "#cad3f5",
+    "surfaceVariant": "#363a4f",
+    "onSurfaceVariant": "#b8c0e0",
+    "surfaceContainer": "#494d64",
+    "outline": "#6e738d"
+  }
+}

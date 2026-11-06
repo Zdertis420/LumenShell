@@ -1,0 +1,23 @@
+{
+  "id": "catppuccin-latte",
+  "name": "Catppuccin Latte",
+  "mode": "light",
+  "roles": {
+    "primary": "#1e66f5",
+    "onPrimary": "#ffffff",
+    "secondary": "#8839ef",
+    "onSecondary": "#ffffff",
+    "tertiary": "#179299",
+    "onTertiary": "#11111b",
+    "error": "#d20f39",
+    "onError": "#ffffff",
+    "background": "#eff1f5",
+    "onBackground": "#4c4f69",
+    "surface": "#e6e9ef",
+    "onSurface": "#4c4f69",
+    "surfaceVariant": "#ccd0da",
+    "onSurfaceVariant": "#4c4f69",
+    "surfaceContainer": "#dce0e8",
+    "outline": "#7c7f93"
+  }
+}
