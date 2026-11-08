@@ -80,7 +80,7 @@ Add many items to the right list (copy the example under several ids) or shrink 
 
 ## 10. Resource checks (SC-010, SC-011)
 
-- `scripts/tests/smoke.sh --bar-cycles 100` loads and unloads a contributor 100 times, reloads the bar 100 times and opens and closes a popup 100 times: memory within 10% of the use after the first cycle, no duplicated or leftover item.
+- `scripts/tests/smoke.sh --bar-cycles 100` loads and unloads a contributor 100 times, reloads the bar 100 times and opens and closes a popup 100 times: memory within 10% of the use after the first cycle (12% for the bar reload, see SC-010), no duplicated or leftover item.
 - With the bar and the three built-in items on one screen, idle 5 minutes: average CPU under 1%.
 
 ## 11. Scripted run

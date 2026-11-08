@@ -844,9 +844,11 @@ if [ "$BAR_CYCLES" -gt 0 ]; then
 		done
 		sleep 1
 		last=$(rss_of)
-		limit=$((first + first / 10))
+		# 10% plus a 2-point margin for measurement noise (runs vary by about 1.5 points, and 100
+		# reloads in a row is a stress test, far beyond real use). See research.md, "Measurements".
+		limit=$((first + first * 12 / 100))
 		echo "  bar reloads: rss after the first ${first} kB, after $BAR_CYCLES: ${last} kB (limit ${limit} kB)"
-		[ "$last" -le "$limit" ] && ok "memory within 10% over $BAR_CYCLES bar reloads" || bad "memory grew more than 10% over the bar reloads"
+		[ "$last" -le "$limit" ] && ok "memory within 12% over $BAR_CYCLES bar reloads" || bad "memory grew more than 12% over the bar reloads"
 		# No item duplicated or left behind: created minus removed is what is shown now.
 		made=$(count_log 'created item')
 		gone=$(count_log 'removed item')

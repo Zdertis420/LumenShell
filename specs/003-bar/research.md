@@ -120,7 +120,9 @@ Facts about Quickshell 0.3.2 below come from reading the installed type descript
 
 ## Measurements (2026-11-07/08, this machine: niri 26.04, 3 outputs, desktop without a battery)
 
-- **Idle CPU (SC-011): 0.02% of one core** over 2 minutes with the bar and the three built-in items on three outputs (`smoke.sh --cpu-minutes 2`). The planned 5-minute run was not done.
+- **Idle CPU (SC-011): 0.02% of one core** with the bar and the three built-in items on three outputs, over 2 minutes and again over the full 5 minutes (`smoke.sh --bar-cycles 100 --cpu-minutes 5`, 2026-11-08). Met.
+- **Full run, 2026-11-08 (`--bar-cycles 100 --cpu-minutes 5`):** contributor 100 cycles 454,724 kB to 473,180 kB (+4.1%, pass); popups 524,528 kB to 524,676 kB (pass); bar reload 473,216 kB to 524,960 kB (+10.9%), down from 12.5%. **Decision (project owner, 2026-11-08):** the limit for the bar reload is 12%, since runs vary by about 1.5 points and 100 reloads in a row is far beyond real use. Met under that limit. The battery item's per-instance UPower cost (about 140 to 280 kB per reload) is known to remain and is accepted.
+- **Flaky smoke checks:** in three full runs the checks "a runtime error is attributed to its module" and "items that do not fit the width are dropped and named" each failed once and passed on the next run (timing-dependent waits in `smoke.sh`, not yet investigated).
 - **Popups (SC-014, memory part):** over 600 open and close cycles, memory stayed within 0.2% (482,700 kB after the first 100, 483,380 kB after 600).
 - **Contributor load and unload (SC-010):** 100 cycles grew memory by about 3% (455,268 kB to 470,512 kB).
 - **Bar reload (SC-010): NOT MET in the combined scenario.** 100 reloads of the bar grew memory from 472,532 kB to 531,888 kB (+12.5%, limit 10%). What I found by isolating it (each number is per reload, noisy by roughly 100 kB):
@@ -130,7 +132,7 @@ Facts about Quickshell 0.3.2 below come from reading the installed type descript
   - The battery item still costs about 140 to 280 kB per reload (UPower bindings per instance). A module-level singleton for the state showed no clear gain, so it was reverted. **Open.**
   - A plain item (the example) costs about 38 kB per reload for three instances.
   - The default bar now measures roughly 340 to 480 kB per reload, which over 100 reloads is just above 10% of the shell's size. This is the open item behind SC-010 for the bar reload, and `smoke.sh --bar-cycles 100` still reports it as a failure.
-- **Not measured:** SC-001, SC-004 and SC-012 timings (start to bar visible, list change to screen, screen unplug and replug), and the 5-minute CPU run.
+- **Not measured:** SC-001, SC-004 and SC-012 timings (start to bar visible, list change to screen, screen unplug and replug). These need a person at a real session.
 
 ## R18. Tests of the interface rule for bundled modules
 
