@@ -209,18 +209,18 @@ func TestScanReservedAndUnknownFieldsAreWarnings(t *testing.T) {
 	if !m.Valid || len(m.Errors) != 0 {
 		t.Fatalf("must be valid: %+v", m)
 	}
-	for _, f := range []string{"extensionPoints", "contributions", "requires"} {
-		if !hasProblem(m.Warnings, f, f+" is not supported in module interface 1.0") {
-			t.Errorf("missing reserved warning for %s: %+v", f, m.Warnings)
-		}
+	// From interface 1.1 on, extensionPoints and contributions take effect (see
+	// modules_contrib_test.go); only `requires` stays reserved.
+	if !hasProblem(m.Warnings, "requires", "requires is not supported in module interface 1.0") {
+		t.Errorf("missing reserved warning for requires: %+v", m.Warnings)
 	}
 	if !hasProblem(m.Warnings, "somethingFromTheFuture", "unknown field") {
 		t.Errorf("missing unknown-field warning: %+v", m.Warnings)
 	}
-	if len(m.Warnings) != 4 {
+	if len(m.Warnings) != 2 {
 		t.Errorf("warnings = %+v", m.Warnings)
 	}
-	if _, ok := m.Manifest["extensionPoints"]; !ok {
+	if _, ok := m.Manifest["requires"]; !ok {
 		t.Errorf("reserved fields must stay in the returned manifest: %v", m.Manifest)
 	}
 }

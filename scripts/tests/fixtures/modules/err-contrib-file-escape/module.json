@@ -1,0 +1,10 @@
+{
+  "id": "err-contrib-file-escape",
+  "name": "Contribution file escapes the directory",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:host-points"],
+  "contributions": [
+    {"id": "x", "name": "X", "target": {"module": "host-points", "point": "items"}, "file": "../Item.qml"}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "id": "err-stringlist-entry",
+  "name": "stringlist with a non-string default entry",
+  "version": "1.0.0",
+  "api": "1.1",
+  "settings": {"names": {"type": "stringlist", "default": ["a", 7]}}
+}

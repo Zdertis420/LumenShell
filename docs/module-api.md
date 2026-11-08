@@ -1,4 +1,4 @@
-# Module interface reference (version 1.0)
+# Module interface reference (version 1.1)
 
 Everything a module is meant to use. The bundled modules use exactly this and nothing more; a test checks it (`scripts/tests/module_api_usage_test.go`). The formal contract is `specs/002-modules/contracts/module-api.md`; the manifest is described in `specs/002-modules/contracts/module-manifest.md`. For a walkthrough, read [writing-a-module.md](writing-a-module.md).
 
@@ -26,7 +26,7 @@ When the module is unloaded (disabled, reloaded, or on shutdown), this object an
 | Member | Needs permission | Description |
 |--------|------------------|-------------|
 | `api.id`, `api.name`, `api.version` | none | From the manifest |
-| `api.apiVersion` | none | The interface version Lumen provides, `"1.0"` |
+| `api.apiVersion` | none | The interface version Lumen provides, `"1.1"` |
 | `api.theme` | none | The 16 color roles (`primary`, `onPrimary`, `surface`, ...), plus `mode`, `paletteId`, `status`, `reason`. Colors follow theme changes live; bind to them, never copy hex values |
 | `api.style` | none | Design tokens: `spacing`, `radius`, `font`, `motion` |
 | `api.log` | none | `debug(msg, fields)`, `info`, `warn`, `error`. Entries carry the source `module:<id>` |
@@ -86,6 +86,30 @@ Declared in the manifest under `settings`: a key and a rule `{type, default, enu
 echo '{"bundledDir":"modules","userDir":"","apiVersion":"1.0","dataDir":"data"}' | scripts/bin/modules schema
 ```
 
+## Interface 1.1: extension points, contributions and commands
+
+Version 1.1 adds ways for modules to work together. Everything is optional, so a 1.0 module loads unchanged. The formal contract is `specs/003-bar/contracts/module-api-1.1.md` and `module-manifest-1.1.md`.
+
+**Manifest fields.** `extensionPoints` (`[{id, description}]`, up to 8) declares a place others may contribute to. `contributions` (`[{id, name, target: {module, point}, file}]`, up to 16) offers a visual part to another module's point. `commands` (up to 16 names) lists what `lumen modules call <id> <command>` may ask the module. A module that contributes to another declares the permission `contribute:<module-id>` for each target; it is shown with the other permissions. `requires` stays reserved: accepted, ignored, and reported as a warning.
+
+**Settings.** The setting type `stringlist` holds a list of strings (`default` an array of strings of 1 to 80 characters, `maxItems` up to 64). Entries of a stored list that are not strings are dropped on their own and reported. `string` settings accept `minLength` and `maxLength`. The entries of `api.settings.errors` gain `dropped` and `value`; for a dropped list entry the key is indexed (`right[2]`) and there is no `fallback`.
+
+**A contributed item** is a file whose root is an `Item` with `required property var api` (its own interface object) and `property var slot` (what the host tells it). The host decides where it goes. For the bar, see [bar.md](bar.md).
+
+**For hosts** (modules that declare a point):
+
+| Member | Description |
+|--------|-------------|
+| `api.extensions.points` | The module's declared points |
+| `api.extensions.contributions(pointId)` | Reactive list of the contributions to one of the module's points, with their states (`shown`, `available`, `waiting`, `rejected`, `failed`) |
+| `api.extensions.create(pointId, itemRef, parent, slot)` | Creates a contributed item (a long or short item name), or returns `null` |
+| `api.extensions.destroyItem(item)` | Destroys an item the host created. Items are also destroyed when either module is unloaded |
+| `api.extensions.reject(pointId, itemRef, reason)` | Refuses a contribution with a reason, until the host's next `resolve` |
+| `api.extensions.report(pointId, info)` | Publishes `{warnings, dropped}` for `lumen modules show` |
+| `api.extensions.resolve(pointId, lists, callback)` | Resolves lists of item names against the available contributions (the rules are in [bar.md](bar.md)) |
+
+**Commands.** A module assigns `api.commands.handler`, a function `(name, args)` that returns text. It runs when `lumen modules call <id> <name>` reaches the module, for a name the manifest declares.
+
 ## Rules for module authors
 
 - Take every color from `api.theme` and every spacing, radius, font size, and duration from `api.style`. Do not hardcode them.
@@ -110,4 +134,4 @@ What changed:
 What to do:
 ```
 
-No migrations yet: this is the first version (1.0). The manifest fields `extensionPoints`, `contributions`, and `requires` are reserved. They are accepted and ignored, with a warning, so a later interface can add extension points compatibly.
+No migrations: version 1.1 only added things (extension points, contributions, commands, the `stringlist` setting type, string length limits, and the `contribute:<module-id>` permission), so no module needs to change. A module that needs a 1.1 member declares `"api": "1.1"`; a 1.0 shell refuses it with the required and available versions. `requires` is still reserved. It is accepted and ignored, with a warning.

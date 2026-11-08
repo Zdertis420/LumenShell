@@ -12,7 +12,7 @@ import (
 // else reads it. Hex literals and named colors are not allowed outside the data files.
 func TestNoColorLiteralsInQML(t *testing.T) {
 	var files []string
-	for _, pattern := range []string{"shell.qml", "singletons/*.qml", "modules/*/*.qml", "examples/*/*.qml"} {
+	for _, pattern := range []string{"shell.qml", "singletons/*.qml", "modules/*/*.qml", "modules/*/*.js", "examples/*/*.qml"} {
 		m, _ := filepath.Glob(filepath.Join(repoRoot, pattern))
 		files = append(files, m...)
 	}

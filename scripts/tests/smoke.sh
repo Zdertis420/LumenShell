@@ -3,6 +3,10 @@
 #
 #   scripts/tests/smoke.sh               run the checks
 #   scripts/tests/smoke.sh --reload N    also trigger N theme reloads and compare memory use
+#   scripts/tests/smoke.sh --modules-cycles N   N load/unload cycles of one module
+#   scripts/tests/smoke.sh --bar-cycles N       N cycles of a bar item (load/unload), of the bar (reload),
+#                                               and of a popup (open/close), comparing memory use
+#   scripts/tests/smoke.sh --cpu-minutes M      average CPU of the idle shell with the bar, over M minutes
 #
 # Needs a niri session (a Wayland display), Quickshell, and built binaries (make build).
 # It uses a temporary config file, so your own configuration is never touched.
@@ -14,6 +18,8 @@ LUMEN=$ROOT/scripts/bin/lumen
 FIXTURES=$ROOT/scripts/tests/fixtures
 RELOADS=0
 CYCLES=0
+BAR_CYCLES=0
+CPU_MINUTES=0
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--reload)
@@ -22,6 +28,14 @@ while [ $# -gt 0 ]; do
 		;;
 	--modules-cycles)
 		CYCLES=${2:-100}
+		shift 2
+		;;
+	--bar-cycles)
+		BAR_CYCLES=${2:-100}
+		shift 2
+		;;
+	--cpu-minutes)
+		CPU_MINUTES=${2:-5}
 		shift 2
 		;;
 	*)
@@ -239,7 +253,7 @@ if start_shell LUMEN_USER_MODULES_DIR="$UM2"; then
 	wait_log 'probe run state' 4 || true
 	wait_log 'denied done' 4 || true
 	for pattern in \
-		'probe id api-probe apiVersion 1.0' \
+		'probe id api-probe apiVersion 1.1' \
 		'probe theme background #' \
 		'probe style spacing.md 12' \
 		'probe settings.greeting hi' \
@@ -345,7 +359,7 @@ if start_shell LUMEN_USER_MODULES_DIR="$UM5"; then
 
 	check "bad JSON is reported with a dir: id" grep -q 'module:dir:err-bad-json","msg":"invalid: .*JSON' "$TMP/shell.log"
 	check "missing main file is reported with the module id" grep -q 'module:err-missing-main","msg":"invalid: main' "$TMP/shell.log"
-	check "newer interface is reported with both versions" grep -q 'module:err-newer-minor","msg":"invalid: api: requires interface 1.9, Lumen provides 1.0' "$TMP/shell.log"
+	check "newer interface is reported with both versions" grep -q 'module:err-newer-minor","msg":"invalid: api: requires interface 1.9, Lumen provides 1.1' "$TMP/shell.log"
 	check "duplicate id is reported with both directories" bash -c "grep 'invalid: id: duplicate' '$TMP/shell.log' | grep -q 'dup-a' "
 	check "odd directory name is shown as dir:bad_name_" grep -q 'module:dir:bad_name_' "$TMP/shell.log"
 	check "QML syntax error is reported with the module id" grep -q 'module:qml-syntax-error","msg":"failed: ' "$TMP/shell.log"
@@ -446,6 +460,320 @@ stop_shell
 "$LUMEN" modules list >/dev/null 2>&1
 [ $? -eq 3 ] && ok "with no shell, modules list exits 3" || bad "with no shell, modules list exits 3"
 
+# ---- 10. The bar: configuration in the file (specs/003-bar quickstart steps 3) ----
+echo "10. the bar"
+UMB="$TMP/user-modules-bar"
+mkdir -p "$UMB"
+STUBS="$TMP/stubs"
+mkdir -p "$STUBS"
+printf '#!/bin/sh\necho "$@" >>"%s/notify.log"\n' "$TMP" >"$STUBS/notify-send"
+chmod +x "$STUBS/notify-send"
+rm -f "$TMP/notify.log"
+bar_layers() { niri msg layers 2>/dev/null | grep -c 'Namespace: "quickshell"'; }
+bar_outputs() { niri msg outputs 2>/dev/null | grep -c '^Output'; }
+bar_first_output() { niri msg outputs 2>/dev/null | sed -n 's/^Output .*(\(.*\))$/\1/p' | head -1; }
+bar_wait_layers() { # bar_wait_layers N seconds
+	local i
+	for i in $(seq 1 $(($2 * 10))); do
+		if [ "$(bar_layers)" -eq "$1" ]; then return 0; fi
+		sleep 0.1
+	done
+	return 1
+}
+printf '{"log":{"level":"debug"}}\n' >"$LUMEN_CONFIG_FILE"
+if start_shell LUMEN_USER_MODULES_DIR="$UMB" PATH="$STUBS:$PATH"; then
+	wait_log 'module:bar","msg":"bar loaded' 5 || true
+	OUTPUTS=$(bar_outputs)
+	bar_wait_layers "$OUTPUTS" 5 && ok "default: one bar on each of the $OUTPUTS outputs" || bad "default: one bar on each output (found $(bar_layers), want $OUTPUTS)"
+	wait_log 'created item bar-clock/clock' 5 || true
+	SHOW=$("$LUMEN" modules show bar 2>&1)
+	check "default: the clock item is shown" grep -Eq 'bar-clock/clock +bar-clock +shown' <<<"$SHOW"
+	check "default: the sound item is shown" grep -Eq 'bar-sound/sound +bar-sound +shown' <<<"$SHOW"
+	check "default: the bar reports its command" grep -q '^Commands:' <<<"$SHOW"
+	check "no errors in the log with the default bar" bash -c "! grep -E '\"level\":\"error\"' '$TMP/shell.log'"
+
+	# Lists: moving, duplicates, unknown names, and a wrong-type entry.
+	CLOCKS_BEFORE=$(count_log 'created item bar-clock/clock')
+	printf '{"log":{"level":"debug"},"modules":{"bar":{"left":["bar-clock"],"center":[],"right":["bar-sound","bar-sound/sound","nope",42,"off-mod"]}}}\n' >"$LUMEN_CONFIG_FILE"
+	wait_log 'right\[2\]: .*nope.*: no such item' 5 && ok "an unknown name is reported with its place and entry" || bad "an unknown name is reported"
+	SHOW=$("$LUMEN" modules show bar 2>&1)
+	check "a duplicate (short and long name) is reported" grep -q 'right\[1\]: "bar-sound/sound": duplicate of right entry 0' <<<"$SHOW"
+	check "the sound item is still shown once" grep -Eq 'bar-sound/sound +bar-sound +shown' <<<"$SHOW"
+	check "an item that is not named is available, not shown" grep -Eq 'bar-battery/battery +bar-battery +available' <<<"$SHOW"
+	wait_log 'right\[3\]: 42 is not a string; entry dropped' 5 && ok "a wrong-type entry is dropped and logged" || bad "a wrong-type entry is dropped and logged"
+	sleep 1
+	[ "$(wc -l <"$TMP/notify.log" 2>/dev/null || echo 0)" -eq 1 ] && ok "exactly one notification was sent for the change" || bad "exactly one notification was sent (got $(wc -l <"$TMP/notify.log" 2>/dev/null))"
+	[ "$(count_log 'created item bar-clock/clock')" -ge "$CLOCKS_BEFORE" ] && ok "a list edit does not recreate an item that stayed in its place" || bad "a list edit recreated the clock"
+
+	# A value that is not a list: the whole key falls back.
+	printf '{"log":{"level":"debug"},"modules":{"bar":{"right":"bar-sound"}}}\n' >"$LUMEN_CONFIG_FILE"
+	sleep 1.5
+	SHOW=$("$LUMEN" modules show bar 2>&1)
+	check "a value that is not a list is an invalid setting for the whole key" grep -Eq 'right: must be a list of strings' <<<"$SHOW"
+
+	# Screens: a missing output, an empty list, one real output, all again.
+	printf '{"modules":{"bar":{"screens":["no-such-output"]}}}\n' >"$LUMEN_CONFIG_FILE"
+	bar_wait_layers 0 5 && ok "screens naming no connected output show no bar" || bad "screens naming no connected output show no bar"
+	printf '{"modules":{"bar":{"screens":[]}}}\n' >"$LUMEN_CONFIG_FILE"
+	bar_wait_layers 0 5 && ok "an empty screens list shows no bar" || bad "an empty screens list shows no bar"
+	printf '{"modules":{"bar":{"screens":["%s"],"edge":"bottom"}}}\n' "$(bar_first_output)" >"$LUMEN_CONFIG_FILE"
+	bar_wait_layers 1 5 && ok "one named output shows one bar (bottom edge)" || bad "one named output shows one bar"
+	check "no QML errors after the screen and edge changes" bash -c "! grep -E 'TypeError|ReferenceError|Unable to assign' '$TMP/shell.log'"
+
+	# Reset: with no override the default bar returns on every output.
+	printf '{}\n' >"$LUMEN_CONFIG_FILE"
+	bar_wait_layers "$OUTPUTS" 5 && ok "removing the overrides brings the default bar back" || bad "removing the overrides brings the default bar back"
+	"$LUMEN" version >/dev/null 2>&1 && ok "the shell is still running" || bad "the shell is still running"
+else
+	bad "shell did not start for the bar checks"
+	cat "$TMP/shell.log"
+fi
+stop_shell
+
+# ---- 11. Another module adds an item to the bar (quickstart step 4, and the limits) ----
+echo "11. contributing to the bar"
+UMC="$TMP/user-modules-contrib"
+rm -rf "$UMC"
+mkdir -p "$UMC"
+cp -r "$ROOT/examples/hello-bar-item" "$MODFIX/bar-item-wrong-point" "$MODFIX/bar-item-target-missing" "$MODFIX/bar-item-two" "$UMC/"
+cfg() { # cfg "<modules json fragment>": a config file with debug logging
+	printf '{"log":{"level":"debug"},"modules":{%s}}\n' "$1" >"$LUMEN_CONFIG_FILE"
+}
+cfg ''
+if start_shell LUMEN_USER_MODULES_DIR="$UMC"; then
+	wait_log 'module:bar","msg":"bar loaded' 5 || true
+	OUTPUTS=$(bar_outputs)
+	SHOW=$("$LUMEN" modules show hello-bar-item 2>&1)
+	check "a contributor that is not enabled is listed with its target and permission" grep -Eq 'hello-bar-item/greeting +hello-bar-item +bar/items +waiting' <<<"$SHOW"
+	check "its permission is shown before it runs" grep -q 'permissions: contribute:bar' <<<"$SHOW"
+	check "it is not loaded" grep -Eq 'state: disabled' <<<"$SHOW"
+
+	# Named before it is enabled: nothing is enabled by the lists (FR-012a).
+	cfg '"bar":{"left":["hello-bar-item"]}'
+	sleep 1.5
+	SHOW=$("$LUMEN" modules show bar 2>&1)
+	check "naming an item of a module that is not enabled warns how to enable it" grep -q 'module hello-bar-item is not enabled; run: lumen modules enable hello-bar-item' <<<"$SHOW"
+	check "the module stays disabled" grep -Eq 'state: disabled' < <("$LUMEN" modules show hello-bar-item 2>&1)
+	"$LUMEN" modules enable hello-bar-item >/dev/null 2>&1
+	wait_log 'created item hello-bar-item/greeting' 5 && ok "enabling the module makes the named item appear without touching the lists" || bad "enabling the module makes the named item appear"
+	check "the item is shown" grep -Eq 'hello-bar-item/greeting +hello-bar-item +shown' < <("$LUMEN" modules show bar 2>&1)
+	check "the item's creation is logged with its module id" grep -q 'module:hello-bar-item","msg":"hello item created"' "$TMP/shell.log"
+
+	# Its own setting, live.
+	cfg '"bar":{"left":["hello-bar-item"]},"hello-bar-item":{"text":"Changed"}'
+	sleep 1.5
+	check "the item's own setting reaches the module" grep -q 'text: Changed' < <("$LUMEN" modules show hello-bar-item 2>&1)
+
+	# Disabling removes the item and leaves nothing behind.
+	"$LUMEN" modules disable hello-bar-item >/dev/null 2>&1
+	wait_log 'removed item hello-bar-item/greeting' 5 && ok "disabling the module removes its item" || bad "disabling the module removes its item"
+	check "its contribution is waiting again" grep -Eq 'hello-bar-item/greeting +hello-bar-item +bar/items +waiting' < <("$LUMEN" modules show hello-bar-item 2>&1)
+
+	# A point the bar does not declare, and a host that is not installed.
+	cfg '"bar-item-wrong-point":{"enabled":true},"bar-item-target-missing":{"enabled":true}'
+	sleep 2
+	check "an item for an undeclared point is rejected with the reason" grep -Eq "rejected \(module bar declares no extension point 'nothing'\)" < <("$LUMEN" modules show bar-item-wrong-point 2>&1)
+	SHOW=$("$LUMEN" modules show bar-item-target-missing 2>&1)
+	check "an item for a missing host loads and waits, naming it" grep -q 'waiting (module nope is not installed)' <<<"$SHOW"
+	check "that module is loaded without error" grep -Eq 'state: loaded' <<<"$SHOW"
+
+	# Short names: the first-declared item has one, the second needs the long form.
+	cfg '"bar":{"left":["bar-item-two","bar-item-two/b","bar-item-two/a"]},"bar-item-two":{"enabled":true}'
+	sleep 2
+	SHOW=$("$LUMEN" modules show bar 2>&1)
+	check "the short name and the long name of the first item are one item" grep -q 'left\[2\]: .*bar-item-two/a.*: duplicate of left entry 0' <<<"$SHOW"
+	check "the second item is placed by its long name" grep -Eq 'bar-item-two/b +.* +shown' <<<"$SHOW" || check "the second item is placed by its long name" grep -Eq 'bar-item-two/b +shown' <<<"$SHOW"
+
+	# The bar disabled: contributors wait; enabled again: the items return.
+	cfg '"bar":{"left":["bar-item-two"]},"bar-item-two":{"enabled":true}'
+	sleep 1.5
+	"$LUMEN" modules disable bar >/dev/null 2>&1
+	sleep 1.5
+	SHOW=$("$LUMEN" modules show bar-item-two 2>&1)
+	check "with the bar disabled the contributor stays loaded" grep -Eq 'state: loaded' <<<"$SHOW"
+	check "and its item waits for the bar" grep -Eq 'bar-item-two/a +bar-item-two +bar/items +waiting \(module bar is not loaded\)' <<<"$SHOW"
+	"$LUMEN" modules enable bar >/dev/null 2>&1
+	sleep 2
+	check "enabling the bar brings the item back" grep -Eq 'bar-item-two/a +bar-item-two +bar/items +shown' < <("$LUMEN" modules show bar-item-two 2>&1)
+
+	# Reloading the bar creates each item once per bar again, with no duplicates.
+	BEFORE=$(count_log 'created item bar-item-two/a on')
+	"$LUMEN" modules reload bar >/dev/null 2>&1
+	sleep 2
+	AFTER=$(count_log 'created item bar-item-two/a on')
+	[ $((AFTER - BEFORE)) -eq "$OUTPUTS" ] && ok "reloading the bar creates the item once per output (no duplicates)" || bad "reloading the bar created $((AFTER - BEFORE)) items, want $OUTPUTS"
+	ERRS=$(grep -E 'TypeError|ReferenceError|Unable to assign' "$TMP/shell.log" | head -3 | cut -c1-300)
+	if [ -z "$ERRS" ]; then ok "no QML errors"; else
+		bad "no QML errors"
+		echo "$ERRS"
+	fi
+
+	# The limit of 32 items, and what does not fit.
+	NAMES=""
+	MODS=""
+	for i in $(seq -w 1 34); do
+		cp -r "$ROOT/examples/hello-bar-item" "$UMC/item-$i"
+		sed -i "s/\"id\": \"hello-bar-item\"/\"id\": \"item-$i\"/" "$UMC/item-$i/module.json"
+		NAMES="$NAMES${NAMES:+,}\"item-$i\""
+		MODS="$MODS,\"item-$i\":{\"enabled\":true}"
+	done
+	"$LUMEN" modules rescan >/dev/null 2>&1
+	cfg "\"bar\":{\"left\":[],\"center\":[],\"right\":[$NAMES]}$MODS"
+	wait_log 'bar on .*: no room for' 10 || true
+	sleep 1
+	SHOW=$("$LUMEN" modules show bar 2>&1)
+	check "items beyond the limit of 32 are rejected with the reason" grep -Eq 'item-34/greeting +item-34 +rejected \(bar item limit \(32\) reached\)' <<<"$SHOW"
+	check "the first 32 are shown" grep -Eq 'item-01/greeting +item-01 +shown' <<<"$SHOW"
+	check "the 33rd is rejected too" grep -Eq 'item-33/greeting +item-33 +rejected' <<<"$SHOW"
+	check "items that do not fit the width are dropped and named" grep -q 'Dropped items (screen' <<<"$SHOW"
+	cfg "\"bar\":{\"left\":[],\"center\":[],\"right\":[\"item-01\",\"item-02\"]}$MODS"
+	wait_log 'all items fit again' 6 && ok "dropped items come back when there is room" || bad "dropped items come back when there is room"
+	check "the shell is still responsive" "$LUMEN" version
+else
+	bad "shell did not start for the contributor checks"
+	cat "$TMP/shell.log"
+fi
+stop_shell
+
+# ---- 12. Theme and keyboard (quickstart step 5) ----
+echo "12. theme and keyboard"
+UMT="$TMP/user-modules-theme"
+rm -rf "$UMT"
+mkdir -p "$UMT"
+cp -r "$ROOT/examples/hello-bar-item" "$UMT/"
+printf '{"log":{"level":"debug"},"modules":{"hello-bar-item":{"enabled":true},"bar":{"left":["hello-bar-item"]}}}\n' >"$LUMEN_CONFIG_FILE"
+if start_shell LUMEN_USER_MODULES_DIR="$UMT"; then
+	wait_log 'created item hello-bar-item/greeting' 5 || true
+	"$LUMEN" theme tokyo-night --temp >/dev/null 2>&1
+	wait_log 'module:bar-clock","msg":"theme tokyo-night' 5 && ok "the clock follows a theme change" || bad "the clock follows a theme change"
+	check "the sound item follows it" grep -q 'module:bar-sound","msg":"theme tokyo-night' "$TMP/shell.log"
+	check "the battery item follows it" grep -q 'module:bar-battery","msg":"theme tokyo-night' "$TMP/shell.log"
+	check "a third-party item follows it" grep -q 'module:hello-bar-item","msg":"theme tokyo-night' "$TMP/shell.log"
+	"$LUMEN" theme catppuccin-latte --temp >/dev/null 2>&1
+	wait_log 'module:bar-clock","msg":"theme catppuccin-latte' 5 && ok "a light preset reaches the items too" || bad "a light preset reaches the items too"
+
+	OUT=$("$LUMEN" modules call bar focus 2>&1)
+	[ $? -eq 0 ] && [[ "$OUT" == focus\ on\ * ]] && ok "the focus command takes the focus ($OUT)" || bad "the focus command takes the focus (got: $OUT)"
+	"$LUMEN" modules call bar nope >/dev/null 2>&1
+	[ $? -eq 6 ] && ok "a command the bar does not declare exits 6" || bad "a command the bar does not declare exits 6"
+	"$LUMEN" modules call bar-clock focus >/dev/null 2>&1
+	[ $? -eq 6 ] && ok "a module that declares no commands exits 6" || bad "a module that declares no commands exits 6"
+	"$LUMEN" modules call no-such-module focus >/dev/null 2>&1
+	[ $? -eq 7 ] && ok "an unknown module exits 7" || bad "an unknown module exits 7"
+	"$LUMEN" modules disable bar >/dev/null 2>&1
+	"$LUMEN" modules call bar focus >/dev/null 2>&1
+	[ $? -eq 6 ] && ok "a module that is not loaded exits 6" || bad "a module that is not loaded exits 6"
+	"$LUMEN" modules enable bar >/dev/null 2>&1
+	check "no QML errors" bash -c "! grep -E 'TypeError|ReferenceError|Unable to assign' '$TMP/shell.log'"
+else
+	bad "shell did not start for the theme and keyboard checks"
+	cat "$TMP/shell.log"
+fi
+stop_shell
+
+# ---- 13. Broken items do not break the bar (quickstart step 6) ----
+echo "13. broken bar items"
+UMI="$TMP/user-modules-broken"
+rm -rf "$UMI"
+mkdir -p "$UMI"
+cp -r "$ROOT/examples/hello-bar-item" "$UMI/"
+for f in bar-item-syntax-error bar-item-missing-import bar-item-storm bar-item-helper-fails bar-item-helper-hangs bar-item-bad-manifest; do
+	cp -r "$MODFIX/$f" "$UMI/"
+done
+BROKEN='"bar-item-syntax-error","bar-item-missing-import","bar-item-storm","bar-item-helper-fails","bar-item-helper-hangs"'
+printf '{"log":{"level":"debug"},"modules":{"hello-bar-item":{"enabled":true},"bar-item-syntax-error":{"enabled":true},"bar-item-missing-import":{"enabled":true},"bar-item-storm":{"enabled":true},"bar-item-helper-fails":{"enabled":true},"bar-item-helper-hangs":{"enabled":true},"bar-item-bad-manifest":{"enabled":true},"bar":{"left":["hello-bar-item",%s]}}}\n' "$BROKEN" >"$LUMEN_CONFIG_FILE"
+if start_shell LUMEN_USER_MODULES_DIR="$UMI"; then
+	wait_log 'fixture bar-item-helper-hangs state timeout' 8 || true
+	sleep 3
+	"$LUMEN" version >/dev/null 2>&1 && ok "the shell answers while broken items are loaded" || bad "the shell answers while broken items are loaded"
+	SHOW=$("$LUMEN" modules show bar 2>&1)
+	check "the good item is still shown" grep -Eq 'hello-bar-item/greeting +hello-bar-item +shown' <<<"$SHOW"
+	check "the built-in items are still shown" grep -Eq 'bar-clock/clock +bar-clock +shown' <<<"$SHOW"
+	check "a syntax error fails only that module, with the file" grep -Eq 'state: failed' < <("$LUMEN" modules show bar-item-syntax-error 2>&1)
+	check "the reason names the item file" grep -q 'Item.qml' < <("$LUMEN" modules show bar-item-syntax-error 2>&1)
+	check "a missing import is reported" grep -q 'does-not-exist' < <("$LUMEN" modules show bar-item-missing-import 2>&1)
+	STORM=$("$LUMEN" modules show bar-item-storm 2>&1)
+	check "an error storm marks the module failed" grep -Eq 'state: failed' <<<"$STORM"
+	check "the storm is reported with the rule" grep -q '3 runtime errors within 5 s' <<<"$STORM"
+	check "the failed item's place is released" grep -Eq 'bar-item-storm/x +bar-item-storm +failed' <<<"$SHOW"
+	check "a failing helper degrades only its item" grep -q 'fixture bar-item-helper-fails state failed' "$TMP/shell.log"
+	check "its module keeps running" grep -Eq 'state: loaded' < <("$LUMEN" modules show bar-item-helper-fails 2>&1)
+	check "a hanging helper is stopped and named" grep -q 'fixture bar-item-helper-hangs state timeout' "$TMP/shell.log"
+	check "a manifest without the permission is invalid, naming it" grep -q 'contribute:bar' < <("$LUMEN" modules show bar-item-bad-manifest 2>&1)
+	LOADS=$(count_log 'module:bar-item-storm","msg":"loaded')
+	sleep 3
+	[ "$(count_log 'module:bar-item-storm","msg":"loaded')" -eq "$LOADS" ] && ok "a failed module is not loaded again by itself" || bad "a failed module was loaded again"
+
+	# Fixed, reloaded: it comes back.
+	cp "$MODFIX/bar-item-two/Item.qml" "$UMI/bar-item-syntax-error/Item.qml"
+	"$LUMEN" modules reload bar-item-syntax-error >/dev/null 2>&1
+	sleep 2
+	check "a fixed item is loaded again after reload" grep -Eq 'bar-item-syntax-error/x +bar-item-syntax-error +shown' < <("$LUMEN" modules show bar 2>&1)
+	ERRS=$(grep -E 'TypeError.*(bar/|Main.qml)' "$TMP/shell.log" | grep -v 'fixture bar item error storm' | head -3 | cut -c1-300)
+	if [ -z "$ERRS" ]; then ok "no unexpected QML errors from the bar"; else
+		bad "no unexpected QML errors from the bar"
+		echo "$ERRS"
+	fi
+else
+	bad "shell did not start for the broken item checks"
+	cat "$TMP/shell.log"
+fi
+stop_shell
+
+# ---- 14. Popups (quickstart step 8) ----
+echo "14. popups"
+UMP="$TMP/user-modules-popup"
+rm -rf "$UMP"
+mkdir -p "$UMP"
+cp -r "$MODFIX/bar-item-popup" "$UMP/"
+cp -r "$MODFIX/bar-item-popup" "$UMP/bar-item-popup2"
+sed -i 's/"id": "bar-item-popup"/"id": "bar-item-popup2"/' "$UMP/bar-item-popup2/module.json"
+overlay_surfaces() { niri msg layers 2>/dev/null | awk '/Overlay layer:/{o=1;next} /(Background|Bottom|Top) layer:/{o=0} /^Output/{o=0} o&&/Namespace: "quickshell"/{n++} END{print n+0}'; }
+printf '{"log":{"level":"debug"},"modules":{"bar-item-popup":{"enabled":true},"bar-item-popup2":{"enabled":true},"bar":{"left":["bar-item-popup","bar-item-popup2"]}}}\n' >"$LUMEN_CONFIG_FILE"
+if start_shell LUMEN_USER_MODULES_DIR="$UMP"; then
+	wait_log 'popup fixture created' 6 || true
+	sleep 1
+	[ "$(overlay_surfaces)" -eq 0 ] && ok "no popup surface while nothing is open" || bad "no popup surface while nothing is open"
+	OUT=$("$LUMEN" modules call bar-item-popup open 2>&1)
+	[ "$OUT" = "true" ] && ok "a popup opens for a shown item" || bad "a popup opens for a shown item (got: $OUT)"
+	wait_log 'popup opened for bar-item-popup/x' 3 && ok "the bar logs it" || bad "the bar logs it"
+	[ "$("$LUMEN" modules call bar-item-popup state 2>&1)" = "true" ] && ok "isOpen is true while it is open" || bad "isOpen is true while it is open"
+	[ "$(overlay_surfaces)" -ge 1 ] && ok "a popup surface is on screen" || bad "a popup surface is on screen"
+	"$LUMEN" modules call bar-item-popup2 open >/dev/null 2>&1
+	sleep 0.5
+	[ "$("$LUMEN" modules call bar-item-popup state 2>&1)" = "false" ] && ok "opening another popup closes the first (one at a time)" || bad "opening another popup closes the first"
+	"$LUMEN" modules call bar-item-popup2 close >/dev/null 2>&1
+	sleep 0.5
+	[ "$(overlay_surfaces)" -eq 0 ] && ok "closing removes the popup surface" || bad "closing removes the popup surface"
+	"$LUMEN" modules call bar-item-popup open >/dev/null 2>&1
+	"$LUMEN" modules disable bar-item-popup >/dev/null 2>&1
+	sleep 1
+	check "disabling the module while its popup is open closes the popup" grep -q 'popup closed for bar-item-popup/x' "$TMP/shell.log"
+	[ "$(overlay_surfaces)" -eq 0 ] && ok "no popup surface is left behind" || bad "no popup surface is left behind"
+
+	# Memory over repeated open and close cycles.
+	"$LUMEN" modules enable bar-item-popup >/dev/null 2>&1
+	sleep 1.5
+	"$LUMEN" modules call bar-item-popup cycle >/dev/null 2>&1
+	sleep 1
+	FIRST=$(ps -o rss= -p "$SHELL_PID" | tr -d ' ')
+	for i in 1 2 3 4 5; do "$LUMEN" modules call bar-item-popup cycle >/dev/null 2>&1; done
+	sleep 1
+	LAST=$(ps -o rss= -p "$SHELL_PID" | tr -d ' ')
+	LIMIT=$((FIRST + FIRST / 10))
+	echo "  rss after the first 100 cycles: ${FIRST} kB, after 600: ${LAST} kB (limit ${LIMIT} kB)"
+	[ "$LAST" -le "$LIMIT" ] && ok "memory within 10% over 600 popup open and close cycles" || bad "memory grew more than 10% over the popup cycles"
+	ERRS=$(grep -E 'ReferenceError|Unable to assign|TypeError' "$TMP/shell.log" | head -3 | cut -c1-300)
+	if [ -z "$ERRS" ]; then ok "no QML errors"; else
+		bad "no QML errors"
+		echo "$ERRS"
+	fi
+else
+	bad "shell did not start for the popup checks"
+	cat "$TMP/shell.log"
+fi
+stop_shell
+
 # ---- 8. Module load/unload memory check ----
 if [ "$CYCLES" -gt 0 ]; then
 	echo "8. $CYCLES module load/unload cycles"
@@ -474,6 +802,88 @@ if [ "$CYCLES" -gt 0 ]; then
 		fi
 	else
 		bad "shell did not start for the module cycle check"
+	fi
+	stop_shell
+fi
+
+# ---- 15. The bar: memory and CPU (quickstart step 10) ----
+rss_of() { ps -o rss= -p "$SHELL_PID" | tr -d ' '; }
+if [ "$BAR_CYCLES" -gt 0 ]; then
+	echo "15. $BAR_CYCLES bar cycles"
+	UMR="$TMP/user-modules-bar-cycles"
+	rm -rf "$UMR"
+	mkdir -p "$UMR"
+	cp -r "$ROOT/examples/hello-bar-item" "$MODFIX/bar-item-popup" "$UMR/"
+	printf '{"modules":{"bar":{"left":["hello-bar-item","bar-item-popup"]},"bar-item-popup":{"enabled":true}}}\n' >"$LUMEN_CONFIG_FILE"
+	if start_shell LUMEN_USER_MODULES_DIR="$UMR"; then
+		sleep 2
+		OUTPUTS=$(bar_outputs)
+		# A contributor loaded and unloaded N times.
+		first=""
+		for i in $(seq 1 "$BAR_CYCLES"); do
+			"$LUMEN" modules enable hello-bar-item >/dev/null 2>&1
+			"$LUMEN" modules disable hello-bar-item >/dev/null 2>&1
+			if [ "$i" -eq 1 ]; then
+				sleep 0.5
+				first=$(rss_of)
+			fi
+		done
+		sleep 1
+		last=$(rss_of)
+		limit=$((first + first / 10))
+		echo "  contributor: rss after the first cycle ${first} kB, after $BAR_CYCLES: ${last} kB (limit ${limit} kB)"
+		[ "$last" -le "$limit" ] && ok "memory within 10% over $BAR_CYCLES contributor load/unload cycles" || bad "memory grew more than 10% over the contributor cycles"
+		# The bar reloaded N times.
+		first=""
+		for i in $(seq 1 "$BAR_CYCLES"); do
+			"$LUMEN" modules reload bar >/dev/null 2>&1
+			if [ "$i" -eq 1 ]; then
+				sleep 0.5
+				first=$(rss_of)
+			fi
+		done
+		sleep 1
+		last=$(rss_of)
+		limit=$((first + first / 10))
+		echo "  bar reloads: rss after the first ${first} kB, after $BAR_CYCLES: ${last} kB (limit ${limit} kB)"
+		[ "$last" -le "$limit" ] && ok "memory within 10% over $BAR_CYCLES bar reloads" || bad "memory grew more than 10% over the bar reloads"
+		# No item duplicated or left behind: created minus removed is what is shown now.
+		made=$(count_log 'created item')
+		gone=$(count_log 'removed item')
+		SHOW=$("$LUMEN" modules show bar 2>&1)
+		check "the bar's items are intact after the cycles" grep -Eq 'bar-clock/clock +bar-clock +shown' <<<"$SHOW"
+		# A popup opened and closed N times.
+		"$LUMEN" modules call bar-item-popup cycle >/dev/null 2>&1
+		sleep 1
+		first=$(rss_of)
+		for i in $(seq 1 $((BAR_CYCLES / 100 + 1))); do "$LUMEN" modules call bar-item-popup cycle >/dev/null 2>&1; done
+		sleep 1
+		last=$(rss_of)
+		limit=$((first + first / 10))
+		echo "  popups: rss after 100 cycles ${first} kB, after more: ${last} kB (limit ${limit} kB)"
+		[ "$last" -le "$limit" ] && ok "memory within 10% over popup open and close cycles" || bad "memory grew more than 10% over the popup cycles"
+	else
+		bad "shell did not start for the bar cycle checks"
+	fi
+	stop_shell
+fi
+
+if [ "$CPU_MINUTES" -gt 0 ]; then
+	echo "15b. idle CPU over $CPU_MINUTES minute(s)"
+	printf '{}\n' >"$LUMEN_CONFIG_FILE"
+	if start_shell LUMEN_USER_MODULES_DIR="$TMP/none"; then
+		sleep 3
+		ticks() { awk '{print $14 + $15}' "/proc/$SHELL_PID/stat"; }
+		hz=$(getconf CLK_TCK)
+		t0=$(ticks)
+		sleep $((CPU_MINUTES * 60))
+		t1=$(ticks)
+		# percent of one core: ticks / hz / seconds * 100, in hundredths to stay in integers
+		hundredths=$(((t1 - t0) * 10000 / hz / (CPU_MINUTES * 60)))
+		echo "  average CPU: $((hundredths / 100)).$(printf '%02d' $((hundredths % 100)))% of one core over $CPU_MINUTES minute(s)"
+		[ "$hundredths" -lt 100 ] && ok "idle CPU with the bar and its built-in items is under 1%" || bad "idle CPU is 1% or more"
+	else
+		bad "shell did not start for the CPU check"
 	fi
 	stop_shell
 fi

@@ -1,0 +1,8 @@
+{
+  "id": "warn-requires",
+  "name": "Requires field",
+  "version": "1.0.0",
+  "api": "1.1",
+  "requires": ["good-min"],
+  "somethingFromTheFuture": 1
+}

@@ -1,0 +1,12 @@
+{
+  "id": "contrib-good",
+  "name": "Contributor",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:host-points"],
+  "contributions": [
+    {"id": "one", "name": "One", "target": {"module": "host-points", "point": "items"}, "file": "Item.qml"},
+    {"id": "two", "name": "Two", "target": {"module": "host-points", "point": "items"}, "file": "Item.qml"},
+    {"id": "three", "name": "Three", "target": {"module": "host-points", "point": "tools"}, "file": "Item.qml"}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "bar-item-helper-fails",
+  "name": "Item whose helper fails",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:bar", "helpers"],
+  "helpers": [{"name": "h", "path": "bin/h"}],
+  "contributions": [
+    {"id": "x", "name": "X", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"}
+  ]
+}

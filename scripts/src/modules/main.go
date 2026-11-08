@@ -87,12 +87,12 @@ func decodeJSON(b []byte) (any, error) {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: modules scan|schema")
+		fmt.Fprintln(os.Stderr, "usage: modules scan|schema|items")
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
-	if cmd != "scan" && cmd != "schema" {
-		fmt.Fprintf(os.Stderr, "unknown subcommand %q; use scan or schema\n", cmd)
+	if cmd != "scan" && cmd != "schema" && cmd != "items" {
+		fmt.Fprintf(os.Stderr, "unknown subcommand %q; use scan, schema or items\n", cmd)
 		os.Exit(2)
 	}
 
@@ -117,5 +117,7 @@ func main() {
 		runScan(in)
 	case "schema":
 		runSchema(in)
+	case "items":
+		runItems(in)
 	}
 }

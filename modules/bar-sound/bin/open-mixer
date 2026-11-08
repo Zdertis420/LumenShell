@@ -1,0 +1,33 @@
+#!/bin/sh
+# Starts an audio mixer program detached and answers at once (module helper contract,
+# specs/003-bar/contracts/helper-bar.md). Input: {"command": "<program and arguments, or empty>"}.
+# With a command it starts that program; without one, the first installed of easyeffects,
+# pavucontrol. The command comes from the user's own configuration
+# (modules.bar-sound.mixer), like a command in a shell startup file.
+
+input=$(cat)
+command=$(printf '%s' "$input" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+
+if [ -z "$command" ]; then
+	for candidate in easyeffects pavucontrol; do
+		if command -v "$candidate" >/dev/null 2>&1; then
+			command=$candidate
+			break
+		fi
+	done
+	if [ -z "$command" ]; then
+		echo '{"ok":false,"protocol":1,"error":{"code":"no_mixer","message":"no audio mixer found (install EasyEffects or pavucontrol, or set modules.bar-sound.mixer)"}}'
+		exit 0
+	fi
+fi
+
+program=${command%% *}
+shown=$(printf '%s' "$program" | tr -d '"\\')
+if ! command -v "$program" >/dev/null 2>&1; then
+	echo '{"ok":false,"protocol":1,"error":{"code":"start_failed","message":"cannot start '"$shown"': program not found"}}'
+	exit 0
+fi
+
+# Detached: its own session, no inherited pipes, so this helper can exit at once.
+setsid sh -c "exec $command" </dev/null >/dev/null 2>&1 &
+echo '{"ok":true,"protocol":1,"data":{"started":"'"$shown"'"}}'

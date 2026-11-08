@@ -1,0 +1,10 @@
+{
+  "id": "bar-item-storm",
+  "name": "Item that raises errors",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:bar"],
+  "contributions": [
+    {"id": "x", "name": "X", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"}
+  ]
+}

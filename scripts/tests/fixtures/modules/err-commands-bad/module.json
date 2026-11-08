@@ -1,0 +1,7 @@
+{
+  "id": "err-commands-bad",
+  "name": "Command with a bad name",
+  "version": "1.0.0",
+  "api": "1.1",
+  "commands": ["Do It"]
+}

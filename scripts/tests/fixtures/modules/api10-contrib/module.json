@@ -1,0 +1,11 @@
+{
+  "id": "api10-contrib",
+  "name": "Interface 1.0 module using 1.1 fields",
+  "version": "1.0.0",
+  "api": "1.0",
+  "permissions": ["contribute:host-points"],
+  "extensionPoints": [{"id": "own", "description": "own point"}],
+  "contributions": [
+    {"id": "old", "name": "Old", "target": {"module": "host-points", "point": "items"}, "file": "Item.qml"}
+  ]
+}

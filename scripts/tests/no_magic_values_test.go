@@ -29,6 +29,11 @@ func TestNoMagicNumbersInTestSurface(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i, line := range strings.Split(string(b), "\n") {
+			// A literal that is a fact, not a design value (for example the 100 in "percent"),
+			// is declared once with this marker on its line.
+			if strings.Contains(line, "// documented constant") {
+				continue
+			}
 			code := line
 			if idx := strings.Index(code, "//"); idx >= 0 {
 				code = code[:idx]

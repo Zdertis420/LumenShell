@@ -1,0 +1,10 @@
+{
+  "id": "err-contrib-slash",
+  "name": "Contribution id with a slash",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:host-points"],
+  "contributions": [
+    {"id": "a/b", "name": "X", "target": {"module": "host-points", "point": "items"}, "file": "Item.qml"}
+  ]
+}

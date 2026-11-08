@@ -1,0 +1,16 @@
+{
+  "id": "bar-sound",
+  "name": "Sound",
+  "version": "1.0.0",
+  "api": "1.1",
+  "description": "Output volume and mute state for the bar. Left click opens an audio mixer, scrolling changes the volume, right click mutes.",
+  "permissions": ["contribute:bar", "helpers"],
+  "helpers": [{"name": "open-mixer", "path": "bin/open-mixer"}],
+  "contributions": [
+    {"id": "sound", "name": "Sound", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"}
+  ],
+  "settings": {
+    "step": {"type": "integer", "default": 5, "min": 1, "max": 25, "description": "Volume change per scroll step, in percent"},
+    "mixer": {"type": "string", "default": "", "maxLength": 128, "description": "Mixer program to open on click; empty means EasyEffects, else pavucontrol"}
+  }
+}

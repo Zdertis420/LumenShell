@@ -117,3 +117,35 @@ func TestSchemaNeedsTheDataDir(t *testing.T) {
 		t.Fatalf("response = %+v", e)
 	}
 }
+
+// Interface 1.1: stringlist settings are arrays of strings, and string length limits appear
+// as minLength and maxLength.
+func TestMergedSchemaDescribesStringlistAndLengths(t *testing.T) {
+	e, r := runModules(t, "schema", map[string]any{
+		"bundledDir": stage(t, "host-points", "good-string-length"), "userDir": "", "apiVersion": "1.1", "dataDir": dataDir(),
+	})
+	if !e.OK {
+		t.Fatalf("schema failed: %+v\nstderr=%s", e.Error, r.stderr)
+	}
+	var out struct {
+		Schema map[string]any `json:"schema"`
+	}
+	if err := json.Unmarshal(e.Data, &out); err != nil {
+		t.Fatal(err)
+	}
+	mods := out.Schema["properties"].(map[string]any)["modules"].(map[string]any)["properties"].(map[string]any)
+
+	left := mods["host-points"].(map[string]any)["properties"].(map[string]any)["left"].(map[string]any)
+	if left["type"] != "array" || left["maxItems"].(float64) != 3 || !reflect.DeepEqual(left["default"], []any{"a"}) {
+		t.Errorf("left = %v", left)
+	}
+	items := left["items"].(map[string]any)
+	if items["type"] != "string" || items["minLength"].(float64) != 1 || items["maxLength"].(float64) != 80 {
+		t.Errorf("items = %v", items)
+	}
+
+	word := mods["good-string-length"].(map[string]any)["properties"].(map[string]any)["word"].(map[string]any)
+	if word["type"] != "string" || word["minLength"].(float64) != 1 || word["maxLength"].(float64) != 8 {
+		t.Errorf("word = %v", word)
+	}
+}

@@ -17,6 +17,13 @@ const (
 	maxSettings      = 64
 	maxPermissions   = 16
 	maxHelpers       = 8
+	// Interface 1.1 (specs/003-bar/contracts/module-manifest-1.1.md).
+	maxPoints        = 8
+	maxContributions = 16
+	maxCommands      = 16
+	maxListEntry     = 80 // characters per entry of a stringlist default
+	maxListItems     = 64
+	maxStringLimit   = 4096
 )
 
 var (
@@ -25,18 +32,46 @@ var (
 	apiPattern     = regexp.MustCompile(`^([0-9]+)\.([0-9]+)$`)
 	settingKey     = regexp.MustCompile(`^[a-z][A-Za-z0-9]{0,31}$`)
 	helperName     = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+	// Item, extension point and command ids share one shape (no slash, so names can use "/").
+	shortID           = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+	contributePattern = regexp.MustCompile(`^contribute:([a-z][a-z0-9-]{1,31})$`)
 )
 
-// permissions is the documented list. Keep in sync with data/schema/module.schema.json
-// and specs/002-modules/data-model.md (a test checks this).
+// permissions is the documented list of fixed names. Keep in sync with
+// data/schema/module.schema.json and specs/002-modules/data-model.md (a test checks this).
+// The form contribute:<module-id> (interface 1.1) is accepted in addition.
 var permissions = []string{"helpers", "config.read", "config.write", "log.read", "modules.read-settings", "network"}
 
-var reservedFields = []string{"extensionPoints", "contributions", "requires"}
+// reservedFields are accepted, ignored, and reported as a warning. extensionPoints and
+// contributions took effect in interface 1.1.
+var reservedFields = []string{"requires"}
 
 var knownFields = map[string]bool{
 	"id": true, "name": true, "version": true, "api": true, "description": true,
 	"main": true, "permissions": true, "settings": true, "helpers": true,
-	"extensionPoints": true, "contributions": true, "requires": true,
+	"extensionPoints": true, "contributions": true, "commands": true, "requires": true,
+}
+
+// pointDecl is an extension point declared in a manifest.
+type pointDecl struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+// targetRef names the extension point a contribution is for.
+type targetRef struct {
+	Module string `json:"module"`
+	Point  string `json:"point"`
+}
+
+// contribDecl is a contribution declared in a manifest.
+type contribDecl struct {
+	ID     string    `json:"id"`
+	Name   string    `json:"name"`
+	Target targetRef `json:"target"`
+	File   string    `json:"file"` // relative here; scan makes it absolute
+	Key    string    `json:"key"`
+	Short  string    `json:"short"`
 }
 
 // problem is one finding about a manifest, tied to a field.
@@ -68,10 +103,13 @@ type helperDecl struct {
 
 // manifest holds what the scan needs from a validated manifest.
 type manifest struct {
-	raw     map[string]any
-	id      string // set only when the id field is usable
-	main    string
-	helpers []helperDecl
+	raw      map[string]any
+	id       string // set only when the id field is usable
+	main     string
+	helpers  []helperDecl
+	points   []pointDecl
+	contribs []contribDecl
+	commands []string
 }
 
 // parseManifest validates the manifest bytes against the rules. lumen is the interface
@@ -152,6 +190,7 @@ func parseManifest(b []byte, lumen apiVersion) (*manifest, []problem, []problem)
 	}
 
 	// Permissions.
+	declared := map[string]bool{}
 	if raw, present := obj["permissions"]; present {
 		list, ok := raw.([]any)
 		if !ok {
@@ -166,17 +205,23 @@ func parseManifest(b []byte, lumen apiVersion) (*manifest, []problem, []problem)
 				switch {
 				case !ok:
 					addErr("permissions", "entries must be strings")
-				case !contains(permissions, s):
-					addErr("permissions", "unknown permission %q (allowed: %s)", s, strings.Join(permissions, ", "))
+				case !contains(permissions, s) && !contributePattern.MatchString(s):
+					addErr("permissions", "unknown permission %q (allowed: %s, or contribute:<module-id>)", s, strings.Join(permissions, ", "))
 				case seen[s]:
 					addErr("permissions", "duplicate permission %q", s)
 				}
 				if ok {
 					seen[s] = true
+					declared[s] = true
 				}
 			}
 		}
 	}
+
+	// Extension points, contributions, and commands (interface 1.1).
+	m.points = parsePoints(obj, addErr)
+	m.contribs = parseContributions(obj, m.id, declared, addErr)
+	m.commands = parseCommands(obj, addErr)
 
 	// Settings.
 	if raw, present := obj["settings"]; present {
@@ -279,8 +324,8 @@ func checkSetting(key string, raw any, addErr func(field, format string, a ...an
 		return
 	}
 	typ, _ := rule["type"].(string)
-	if typ != "string" && typ != "integer" && typ != "number" && typ != "boolean" {
-		addErr(field+".type", "must be string, integer, number, or boolean")
+	if typ != "string" && typ != "integer" && typ != "number" && typ != "boolean" && typ != "stringlist" {
+		addErr(field+".type", "must be string, integer, number, boolean, or stringlist")
 		return
 	}
 	def, hasDef := rule["default"]
@@ -329,13 +374,46 @@ func checkSetting(key string, raw any, addErr func(field, format string, a ...an
 	if min != nil && max != nil && *min > *max {
 		addErr(field, "min must not be greater than max")
 	}
-	if p := checkSettingValue(typ, enum, min, max, def); p != "" {
+
+	// minLength and maxLength (string settings), maxItems (stringlist settings).
+	var minLen, maxLen *int
+	for _, bound := range []struct {
+		name string
+		dst  **int
+	}{{"minLength", &minLen}, {"maxLength", &maxLen}} {
+		v, present := rule[bound.name]
+		if !present {
+			continue
+		}
+		n, isNum := v.(json.Number)
+		i, err := n.Int64()
+		if typ != "string" || !isNum || err != nil || i < 0 || i > maxStringLimit {
+			addErr(field+"."+bound.name, "is only allowed for string settings and must be a whole number from 0 to %d", maxStringLimit)
+			continue
+		}
+		v2 := int(i)
+		*bound.dst = &v2
+	}
+	if minLen != nil && maxLen != nil && *minLen > *maxLen {
+		addErr(field, "minLength must not be greater than maxLength")
+	}
+	maxItems := maxListItems
+	if v, present := rule["maxItems"]; present {
+		n, isNum := v.(json.Number)
+		i, err := n.Int64()
+		if typ != "stringlist" || !isNum || err != nil || i < 1 || i > maxListItems {
+			addErr(field+".maxItems", "is only allowed for stringlist settings and must be a whole number from 1 to %d", maxListItems)
+		} else {
+			maxItems = int(i)
+		}
+	}
+	if p := checkSettingValue(typ, enum, min, max, minLen, maxLen, maxItems, def); p != "" {
 		addErr(field+".default", "%s", p)
 	}
 }
 
 // checkSettingValue returns "" when v satisfies the rule, otherwise a short problem text.
-func checkSettingValue(typ string, enum []string, min, max *float64, v any) string {
+func checkSettingValue(typ string, enum []string, min, max *float64, minLen, maxLen *int, maxItems int, v any) string {
 	inRange := func(f float64) bool {
 		return (min == nil || f >= *min) && (max == nil || f <= *max)
 	}
@@ -372,8 +450,35 @@ func checkSettingValue(typ string, enum []string, min, max *float64, v any) stri
 		if !ok {
 			return "default must be a string"
 		}
+		if n := utf8.RuneCountInString(s); (minLen != nil && n < *minLen) || (maxLen != nil && n > *maxLen) {
+			switch {
+			case minLen != nil && maxLen != nil:
+				return fmt.Sprintf("default must be a string of %d to %d characters", *minLen, *maxLen)
+			case minLen != nil:
+				return fmt.Sprintf("default must be a string of at least %d characters", *minLen)
+			default:
+				return fmt.Sprintf("default must be a string of at most %d characters", *maxLen)
+			}
+		}
 		if enum != nil && !contains(enum, s) {
 			return "default must be one of " + strings.Join(enum, ", ")
+		}
+	case "stringlist":
+		list, ok := v.([]any)
+		if !ok {
+			return "default must be a list of strings"
+		}
+		if len(list) > maxItems {
+			return fmt.Sprintf("default must have at most %d entries", maxItems)
+		}
+		for _, item := range list {
+			s, ok := item.(string)
+			if !ok {
+				return "default entries must be strings"
+			}
+			if n := utf8.RuneCountInString(s); n < 1 || n > maxListEntry {
+				return fmt.Sprintf("default entries must be 1 to %d characters", maxListEntry)
+			}
 		}
 	}
 	return ""

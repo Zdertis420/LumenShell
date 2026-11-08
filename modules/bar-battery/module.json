@@ -1,0 +1,15 @@
+{
+  "id": "bar-battery",
+  "name": "Battery",
+  "version": "1.0.0",
+  "api": "1.1",
+  "description": "Battery level and charging state for the bar. Hidden on a machine without a battery.",
+  "permissions": ["contribute:bar"],
+  "contributions": [
+    {"id": "battery", "name": "Battery", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"}
+  ],
+  "settings": {
+    "lowLevel": {"type": "integer", "default": 20, "min": 1, "max": 99, "description": "Percent at or below which the level is shown as low"},
+    "criticalLevel": {"type": "integer", "default": 10, "min": 1, "max": 98, "description": "Percent at or below which the level is shown as critical"}
+  }
+}

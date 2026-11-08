@@ -1,0 +1,10 @@
+{
+  "id": "contrib-self",
+  "name": "Contributes to itself",
+  "version": "1.0.0",
+  "api": "1.1",
+  "extensionPoints": [{"id": "slots", "description": "own slots"}],
+  "contributions": [
+    {"id": "mine", "name": "Mine", "target": {"module": "contrib-self", "point": "slots"}, "file": "Item.qml"}
+  ]
+}

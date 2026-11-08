@@ -11,8 +11,18 @@ func settingSchema(rule map[string]any) map[string]any {
 	out := map[string]any{}
 	if typ, ok := rule["type"].(string); ok {
 		out["type"] = typ
+		if typ == "stringlist" {
+			// A stringlist is a JSON array of non-empty strings (module interface 1.1).
+			out["type"] = "array"
+			out["items"] = map[string]any{"type": "string", "minLength": 1, "maxLength": maxListEntry}
+			maxItems := any(maxListItems)
+			if v, ok := rule["maxItems"]; ok {
+				maxItems = v
+			}
+			out["maxItems"] = maxItems
+		}
 	}
-	for _, k := range []string{"default", "enum", "description"} {
+	for _, k := range []string{"default", "enum", "description", "minLength", "maxLength"} {
 		if v, ok := rule[k]; ok {
 			out[k] = v
 		}

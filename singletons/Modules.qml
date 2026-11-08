@@ -21,8 +21,9 @@ Singleton {
 
     id: root
 
-    // The module interface version Lumen provides (major.minor).
-    readonly property string apiVersion: "1.0"
+    // The module interface version Lumen provides (major.minor). 1.1 added extension points,
+    // contributions, module commands, and the stringlist setting type (specs/003-bar).
+    readonly property string apiVersion: "1.1"
     // Module records (plain objects, see specs/002-modules/data-model.md). Replaced as a
     // whole on every change, so bindings update.
     property var list: []
@@ -49,6 +50,21 @@ Singleton {
     property bool followerStarted: false
     property int followerFailures: 0
     property double followerStart: 0
+    // ---- interface 1.1: extension points and contributions ----
+    // Bumped whenever an item is created, destroyed, or refused, so bindings that read
+    // contribution states update.
+    readonly property int resultLimit: 4096
+    // documented constant: bytes of a command's answer
+    property int itemRevision: 0
+    // Items created through createItem: [{key, hostId, pointId, contributorId, object, component}].
+    // A host may destroy an item's parent, so entries whose object is gone are skipped on read.
+    property var items: []
+    // Refusals by hosts: "<host>|<point>|<key>" -> reason (cleared by the host's next resolve).
+    property var rejects: ({
+    })
+    // Reports published by hosts: "<host>|<point>" -> {warnings, dropped}.
+    property var reports: ({
+    })
 
     function find(id: string) : variant {
         for (const rec of root.list) {
@@ -74,7 +90,9 @@ Singleton {
                 out.push({
                 "key": e.key.substring(prefix.length),
                 "problem": e.problem,
-                "fallback": e.fallback
+                "fallback": e.fallback,
+                "dropped": e.dropped === true,
+                "value": e.value
             });
 
         }
@@ -98,7 +116,10 @@ Singleton {
                 "warnings": rec.warnings,
                 "settingErrors": root.settingErrorsOf(rec.id),
                 "runtimeErrors": rec.runtimeErrors,
-                "lastError": rec.lastError
+                "lastError": rec.lastError,
+                "extensionPoints": rec.extensionPoints,
+                "contributions": rec.contributions,
+                "contributionStates": root.contributionStatesOf(rec)
             });
         }
         return out;
@@ -135,8 +156,120 @@ Singleton {
             "lastError": old ? old.lastError : (m.valid ? "" : root.firstError(m.errors)),
             "runtimeErrors": old ? old.runtimeErrors : 0,
             "loadedAt": old ? old.loadedAt : 0,
-            "blocked": old ? old.blocked : !m.valid
+            "blocked": old ? old.blocked : !m.valid,
+            "extensionPoints": m.extensionPoints ?? [],
+            "contributions": m.contributions ?? [],
+            "commands": m.commands ?? []
         };
+    }
+
+    // ---- contribution states (specs/003-bar/data-model.md) ----
+    // One of: shown, available, waiting, rejected, failed. Reads itemRevision, so a binding
+    // that calls this follows item creation and refusals as well as module state changes.
+    function contributionState(owner, c) : variant {
+        root.itemRevision;
+        if (owner.state === "failed")
+            return {
+            "state": "failed",
+            "reason": owner.lastError
+        };
+
+        if (owner.state !== "loaded")
+            return {
+            "state": "waiting",
+            "reason": "module " + owner.id + " is not enabled"
+        };
+
+        const host = root.find(c.target.module);
+        if (host === null)
+            return {
+            "state": "waiting",
+            "reason": "module " + c.target.module + " is not installed"
+        };
+
+        if (host.state !== "loaded")
+            return {
+            "state": "waiting",
+            "reason": "module " + host.id + " is not loaded"
+        };
+
+        const declares = (host.extensionPoints ?? []).some((p) => {
+            return p.id === c.target.point;
+        });
+        if (!declares)
+            return {
+            "state": "rejected",
+            "reason": "module " + host.id + " declares no extension point '" + c.target.point + "'"
+        };
+
+        if (owner.id !== host.id && owner.permissions.indexOf("contribute:" + host.id) < 0)
+            return {
+            "state": "rejected",
+            "reason": "permission contribute:" + host.id + " is not declared"
+        };
+
+        const refusal = root.rejects[host.id + "|" + c.target.point + "|" + c.key];
+        if (refusal !== undefined)
+            return {
+            "state": "rejected",
+            "reason": refusal
+        };
+
+        const shown = root.items.some((it) => {
+            return it.key === c.key && it.object !== null && it.object !== undefined;
+        });
+        return {
+            "state": shown ? "shown" : "available",
+            "reason": ""
+        };
+    }
+
+    function contributionStatesOf(rec) : variant {
+        return (rec.contributions ?? []).map((c) => {
+            const s = root.contributionState(rec, c);
+            return {
+                "id": c.id,
+                "state": s.state,
+                "reason": s.reason
+            };
+        });
+    }
+
+    // The contributions that target one extension point, with their states.
+    function contributionsTo(moduleId: string, pointId: string) : variant {
+        const out = [];
+        for (const rec of root.list) {
+            for (const c of (rec.contributions ?? [])) {
+                if (c.target.module !== moduleId || c.target.point !== pointId)
+                    continue;
+
+                const s = root.contributionState(rec, c);
+                out.push({
+                    "key": c.key,
+                    "short": c.short ?? "",
+                    "module": rec.id,
+                    "item": c.id,
+                    "name": c.name,
+                    "state": s.state,
+                    "reason": s.reason
+                });
+            }
+        }
+        return out;
+    }
+
+    function findContribution(key: string) : variant {
+        for (const rec of root.list) {
+            for (const c of (rec.contributions ?? [])) {
+                if (c.key === key)
+                    return {
+                    "owner": rec,
+                    "contribution": c
+                };
+
+            }
+        }
+        return null;
     }
 
     // The definitions of the modules, as the config helper wants them. An invalid module
@@ -218,8 +351,30 @@ Singleton {
             "lastError": rec.lastError,
             "warnings": rec.warnings.map((w) => {
                 return (w.field ? w.field + ": " : "") + w.problem;
-            })
+            }),
+            "notes": root.notesOf(rec)
         };
+    }
+
+    // Short labels for `lumen modules list`: what the module hosts and contributes to.
+    function notesOf(rec) : variant {
+        const notes = [];
+        const targets = [];
+        for (const c of (rec.contributions ?? [])) {
+            if (targets.indexOf(c.target.module) < 0)
+                targets.push(c.target.module);
+
+        }
+        if (targets.length > 0)
+            notes.push("contributes to " + targets.join(", "));
+
+        const points = (rec.extensionPoints ?? []).map((p) => {
+            return p.id;
+        });
+        if (points.length > 0)
+            notes.push("hosts: " + points.join(", "));
+
+        return notes;
     }
 
     function detailOf(rec) : variant {
@@ -246,6 +401,38 @@ Singleton {
         detail.helpers = (rec.manifest.helpers ?? []).map((h) => {
             return h.name;
         });
+        // Interface 1.1: extension points with their contributions, own contributions,
+        // commands, and what a host reported about its points (specs/003-bar/contracts/cli-ipc-bar.md).
+        detail.commands = rec.commands ?? [];
+        detail.contributions = (rec.contributions ?? []).map((c) => {
+            const s = root.contributionState(rec, c);
+            return {
+                "key": c.key,
+                "short": c.short ?? "",
+                "name": c.name,
+                "target": c.target,
+                "state": s.state,
+                "reason": s.reason
+            };
+        });
+        detail.extensionPoints = (rec.extensionPoints ?? []).map((p) => {
+            return {
+                "id": p.id,
+                "description": p.description ?? "",
+                "contributions": root.contributionsTo(rec.id, p.id)
+            };
+        });
+        let dropped = [];
+        let itemWarnings = [];
+        for (const p of (rec.extensionPoints ?? [])) {
+            const report = root.reports[rec.id + "|" + p.id];
+            if (report) {
+                dropped = dropped.concat(report.dropped ?? []);
+                itemWarnings = itemWarnings.concat(report.warnings ?? []);
+            }
+        }
+        detail.dropped = dropped;
+        detail.itemWarnings = itemWarnings;
         return detail;
     }
 
@@ -564,8 +751,275 @@ Singleton {
         }
     }
 
+    // ---- module commands (interface 1.1) ----
+    // Runs a declared command of a loaded module through the handler it assigned to
+    // api.commands.handler. Always answers at once: {ok, result} or {error: "<kind>: <message>"}.
+    function callCommand(id: string, name: string) : variant {
+        const rec = root.find(id);
+        if (rec === null)
+            return {
+            "error": "unknown: unknown module '" + id + "'"
+        };
+
+        if (rec.state !== "loaded" || !root.live[id])
+            return {
+            "error": "failed: module " + id + " is not loaded"
+        };
+
+        if ((rec.commands ?? []).indexOf(name) < 0)
+            return {
+            "error": "failed: unknown command '" + name + "'"
+        };
+
+        const handler = root.live[id].api.commands.handler;
+        if (typeof handler !== "function")
+            return {
+            "error": "failed: module " + id + " has no handler for '" + name + "'"
+        };
+
+        try {
+            const result = handler(name, []);
+            return {
+                "ok": true,
+                "result": String(result ?? "").slice(0, root.resultLimit)
+            };
+        } catch (e) {
+            root.writeLog("error", rec, "command " + name + " threw: " + e, null);
+            return {
+                "error": "failed: " + String(e.message ?? e)
+            };
+        }
+    }
+
+    // ---- items contributed to extension points (interface 1.1) ----
+    // Creates the contributed item named by key for host hostId. Returns the object, or null
+    // when the contribution cannot be shown (the reason is the contribution's state or a log
+    // line). A component or creation error fails the contributor, never the host.
+    function createItem(hostId: string, pointId: string, key: string, parent, slot) : variant {
+        const found = root.findContribution(key);
+        if (found === null) {
+            Log.warn("module " + hostId + " asked for an unknown item '" + key + "'", {
+                "source": "module:" + hostId
+            });
+            return null;
+        }
+        const owner = found.owner;
+        const c = found.contribution;
+        if (c.target.module !== hostId || c.target.point !== pointId) {
+            Log.warn("module " + hostId + " asked for item '" + key + "', which is not for its point '" + pointId + "'", {
+                "source": "module:" + hostId
+            });
+            return null;
+        }
+        const state = root.contributionState(owner, c);
+        if (state.state !== "available" && state.state !== "shown") {
+            if (state.state === "rejected")
+                Log.warn("item " + key + " was refused: " + state.reason, {
+                "source": "module:" + hostId
+            });
+
+            return null;
+        }
+        const live = root.live[owner.id];
+        let comp = null;
+        try {
+            comp = Qt.createComponent("file://" + c.file + "?r=" + (++root.loadCounter));
+            if (comp.status !== Component.Ready) {
+                const text = comp.status === Component.Error ? comp.errorString() : "the component did not finish loading";
+                throw new Error(text.split("\n")[0].split("file://" + owner.dir + "/").join("").trim());
+            }
+            const obj = comp.createObject(parent, {
+                "api": live.api,
+                "slot": slot
+            });
+            if (obj === null) {
+                const text = comp.errorString();
+                throw new Error(text ? text.split("\n")[0].split("file://" + owner.dir + "/").join("").trim() : "the item could not be created");
+            }
+            root.items = root.items.concat([{
+                "key": key,
+                "hostId": hostId,
+                "pointId": pointId,
+                "contributorId": owner.id,
+                "object": obj,
+                "component": comp
+            }]);
+            root.itemRevision += 1;
+            return obj;
+        } catch (e) {
+            if (comp)
+                comp.destroy();
+
+            // The contributor failed to build its visual part: only it is marked failed.
+            root.unload(owner);
+            root.fail(owner, c.file.split(owner.dir + "/").join("") + ": " + String(e.message ?? e));
+            root.touch();
+            return null;
+        }
+    }
+
+    function destroyEntry(entry) {
+        try {
+            if (entry.object)
+                entry.object.destroy();
+
+            entry.component.destroy();
+        } catch (e) {
+            Log.error("destroying item " + entry.key + " threw: " + e);
+        }
+    }
+
+    // Destroys one item created by createItem. Returns true when it was one of ours.
+    function destroyItem(item) : bool {
+        const keep = [];
+        let found = false;
+        for (const entry of root.items) {
+            if (entry.object === item) {
+                root.destroyEntry(entry);
+                found = true;
+            } else {
+                keep.push(entry);
+            }
+        }
+        if (found) {
+            root.items = keep;
+            root.itemRevision += 1;
+        }
+        return found;
+    }
+
+    // Destroys every item the module contributed and every item created for it as a host.
+    function destroyItemsOf(moduleId: string) {
+        const keep = [];
+        let any = false;
+        for (const entry of root.items) {
+            if (entry.contributorId === moduleId || entry.hostId === moduleId) {
+                root.destroyEntry(entry);
+                any = true;
+            } else {
+                keep.push(entry);
+            }
+        }
+        if (any) {
+            root.items = keep;
+            root.itemRevision += 1;
+        }
+    }
+
+    // A host refuses a contribution with a reason. The mark lasts until the host's next
+    // resolveItems; an item that already exists is destroyed.
+    function rejectItem(hostId: string, pointId: string, key: string, reason: string) {
+        const found = root.findContribution(key);
+        if (found === null || found.contribution.target.module !== hostId || found.contribution.target.point !== pointId) {
+            Log.warn("module " + hostId + " refused an unknown item '" + key + "'", {
+                "source": "module:" + hostId
+            });
+            return ;
+        }
+        const marks = Object.assign({
+        }, root.rejects);
+        marks[hostId + "|" + pointId + "|" + key] = reason;
+        root.rejects = marks;
+        const keep = [];
+        for (const entry of root.items) {
+            if (entry.key === key && entry.hostId === hostId && entry.pointId === pointId)
+                root.destroyEntry(entry);
+            else
+                keep.push(entry);
+        }
+        root.items = keep;
+        root.itemRevision += 1;
+    }
+
+    // Stores what a host reports about one of its points (shown by `lumen modules show`).
+    function setReport(hostId: string, pointId: string, info) {
+        const next = Object.assign({
+        }, root.reports);
+        next[hostId + "|" + pointId] = info;
+        root.reports = next;
+    }
+
+    // Resolves a host's lists of item names against the available contributions, in the
+    // `modules` helper. callback({lists, warnings, available}) or callback({error}).
+    function resolveItems(hostId: string, pointId: string, lists, callback) {
+        // A new resolution clears this host's earlier refusals.
+        const prefix = hostId + "|" + pointId + "|";
+        const next = {
+        };
+        let cleared = false;
+        for (const k in root.rejects) {
+            if (k.indexOf(prefix) === 0)
+                cleared = true;
+            else
+                next[k] = root.rejects[k];
+        }
+        if (cleared) {
+            root.rejects = next;
+            root.itemRevision += 1;
+        }
+        const table = [];
+        for (const rec of root.list) {
+            for (const c of (rec.contributions ?? [])) {
+                if (c.target.module !== hostId || c.target.point !== pointId)
+                    continue;
+
+                table.push({
+                    "key": c.key,
+                    "short": c.short ?? "",
+                    "module": rec.id,
+                    "item": c.id,
+                    "name": c.name,
+                    "moduleState": rec.state,
+                    "enabled": rec.enabled,
+                    "reason": rec.lastError ?? "",
+                    "target": c.target
+                });
+            }
+        }
+        // The host may be reloaded or unloaded while the helper runs; then nobody wants the answer.
+        const hostLive = root.live[hostId];
+        Backend.run("modules", ["items"], {
+            "point": {
+                "module": hostId,
+                "point": pointId
+            },
+            "lists": lists,
+            "contributions": table
+        }, 0, (req) => {
+            if (root.live[hostId] !== hostLive || hostLive === undefined)
+                return ;
+
+            if (req.state !== "ok") {
+                const message = req.error ? req.error.message : req.state;
+                Log.error("resolving the items of " + hostId + "/" + pointId + " " + req.state + ": " + message, {
+                    "source": "module:" + hostId
+                });
+                if (callback)
+                    callback({
+                    "error": message
+                });
+
+                return ;
+            }
+            const d = req.data;
+            if (callback)
+                callback({
+                "lists": {
+                    "left": d.left,
+                    "center": d.center,
+                    "right": d.right
+                },
+                "warnings": d.warnings,
+                "available": d.available
+            });
+
+        }, "module:" + hostId);
+    }
+
     // Unloads one module and releases everything it created.
     function unload(rec) {
+        // Items first: the ones it contributed and the ones created for it as a host.
+        root.destroyItemsOf(rec.id);
         const l = root.live[rec.id];
         if (!l)
             return ;

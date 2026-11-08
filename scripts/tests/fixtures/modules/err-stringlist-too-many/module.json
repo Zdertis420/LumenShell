@@ -1,0 +1,7 @@
+{
+  "id": "err-stringlist-too-many",
+  "name": "stringlist default longer than maxItems",
+  "version": "1.0.0",
+  "api": "1.1",
+  "settings": {"names": {"type": "stringlist", "default": ["a", "b"], "maxItems": 1}}
+}

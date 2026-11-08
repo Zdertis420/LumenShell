@@ -1,0 +1,11 @@
+{
+  "id": "err-contrib-dup-id",
+  "name": "Duplicate contribution ids",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:host-points"],
+  "contributions": [
+    {"id": "dup", "name": "A", "target": {"module": "host-points", "point": "items"}, "file": "Item.qml"},
+    {"id": "dup", "name": "B", "target": {"module": "host-points", "point": "items"}, "file": "Item.qml"}
+  ]
+}

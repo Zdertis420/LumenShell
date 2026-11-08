@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,10 @@ type configError struct {
 	Key      string `json:"key"`
 	Problem  string `json:"problem"`
 	Fallback any    `json:"fallback"`
+	// Set only for one dropped entry of a stringlist: Key is then indexed
+	// (modules.<id>.<key>[<index>]), Value is the entry as written, Fallback is null.
+	Dropped bool `json:"dropped,omitempty"`
+	Value   any  `json:"value,omitempty"`
 }
 
 // readUserFile loads the user's override file.
@@ -84,6 +89,16 @@ func runResolve(in map[string]any) {
 			errs = append(errs, configError{Key: r.key, Problem: p, Fallback: r.def})
 			logf("warn", r.key+": "+p, map[string]any{"key": r.key})
 			continue
+		}
+		if r.kind == "stringlist" {
+			// Bad entries are dropped on their own; the rest of the list stays.
+			kept, dropped := r.filterList(v)
+			for _, d := range dropped {
+				key := fmt.Sprintf("%s[%d]", r.key, d.index)
+				errs = append(errs, configError{Key: key, Problem: d.problem, Dropped: true, Value: d.value})
+				logf("warn", key+" "+d.problem, map[string]any{"key": key})
+			}
+			v = kept
 		}
 		setPath(valid, r.key, v)
 	}

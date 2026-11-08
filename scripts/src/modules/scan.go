@@ -24,6 +24,14 @@ type scanned struct {
 	Manifest       map[string]any `json:"manifest"`
 	Errors         []problem      `json:"errors"`
 	Warnings       []problem      `json:"warnings"`
+	// Interface 1.1. Only set for valid modules: an invalid module registers nothing.
+	ExtensionPoints []pointDecl   `json:"extensionPoints,omitempty"`
+	Contributions   []contribDecl `json:"contributions,omitempty"`
+	Commands        []string      `json:"commands,omitempty"`
+
+	points   []pointDecl
+	contribs []contribDecl
+	commands []string
 }
 
 var unsafeDirChars = regexp.MustCompile(`[^A-Za-z0-9._-]`)
@@ -91,6 +99,7 @@ func scanOne(root, name, origin string, lumen apiVersion) scanned {
 		m, errs, warns := parseManifest(b, lumen)
 		s.Manifest, s.Errors, s.Warnings = m.raw, append(s.Errors, errs...), append(s.Warnings, warns...)
 		s.ID = m.id
+		s.points, s.contribs, s.commands = m.points, m.contribs, m.commands
 		s.checkFiles(m)
 	}
 
@@ -114,6 +123,15 @@ func (s *scanned) checkFiles(m *manifest) {
 	} else {
 		s.Main = main
 	}
+	for i, c := range m.contribs {
+		if c.File == "" {
+			continue // already reported by the manifest rules
+		}
+		field := fmt.Sprintf("contributions[%d].file", i)
+		if st, err := os.Stat(filepath.Join(s.Dir, c.File)); err != nil || !st.Mode().IsRegular() {
+			s.Errors = append(s.Errors, problem{field, fmt.Sprintf("contribution file %s not found", c.File)})
+		}
+	}
 	for i, h := range m.helpers {
 		field := fmt.Sprintf("helpers[%d].path", i)
 		st, err := os.Stat(filepath.Join(s.Dir, h.Path))
@@ -123,6 +141,25 @@ func (s *scanned) checkFiles(m *manifest) {
 		case st.Mode().Perm()&0o111 == 0:
 			s.Errors = append(s.Errors, problem{field, fmt.Sprintf("helper file %s is not executable", h.Path)})
 		}
+	}
+}
+
+// publishInterface11 copies the extension points, contributions and commands of a valid
+// module into the result: files made absolute, the long name set, and the short name given
+// to the first-declared contribution per target point (specs/003-bar/contracts/helper-bar.md).
+func (s *scanned) publishInterface11() {
+	s.ExtensionPoints = s.points
+	s.Commands = s.commands
+	firstFor := map[string]bool{}
+	for _, c := range s.contribs {
+		c.File = filepath.Join(s.Dir, c.File)
+		c.Key = s.ID + "/" + c.ID
+		target := c.Target.Module + "/" + c.Target.Point
+		if !firstFor[target] {
+			firstFor[target] = true
+			c.Short = s.ID
+		}
+		s.Contributions = append(s.Contributions, c)
 	}
 }
 
@@ -168,7 +205,9 @@ func scanAll(bundledDir, userDir string, lumen apiVersion) []scanned {
 		out[i].Valid = len(out[i].Errors) == 0
 		if !out[i].Valid {
 			out[i].Main = ""
+			continue
 		}
+		out[i].publishInterface11()
 	}
 	if tooMany {
 		out = append(out, scanned{

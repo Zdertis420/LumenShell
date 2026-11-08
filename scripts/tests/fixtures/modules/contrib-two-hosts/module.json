@@ -1,0 +1,11 @@
+{
+  "id": "contrib-two-hosts",
+  "name": "Contributor to two hosts",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:host-points", "contribute:other-host"],
+  "contributions": [
+    {"id": "a", "name": "A", "target": {"module": "host-points", "point": "items"}, "file": "Item.qml"},
+    {"id": "b", "name": "B", "target": {"module": "other-host", "point": "items"}, "file": "Item.qml"}
+  ]
+}

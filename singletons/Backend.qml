@@ -241,6 +241,20 @@ Singleton {
             return JSON.stringify(Modules.detailOf(Modules.find(id)));
         }
 
+        // Runs one declared command of a module and answers at once (interface 1.1,
+        // specs/003-bar/contracts/cli-ipc-bar.md).
+        function moduleCall(id: string, command: string) : string {
+            const bad = root.checkModuleId(id);
+            if (bad)
+                return bad;
+
+            if (!/^[a-z][a-z0-9-]{0,31}$/.test(command))
+                return "error: invalid: invalid command name '" + command + "'";
+
+            const r = Modules.callCommand(id, command);
+            return r.error ? "error: " + r.error : JSON.stringify(r);
+        }
+
         function moduleEnable(id: string) : string {
             return root.queueModule(id, (seq) => {
                 Modules.setEnabled(id, true, (result) => {

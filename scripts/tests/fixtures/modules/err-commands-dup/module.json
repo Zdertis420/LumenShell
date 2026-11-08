@@ -1,0 +1,7 @@
+{
+  "id": "err-commands-dup",
+  "name": "Duplicate commands",
+  "version": "1.0.0",
+  "api": "1.1",
+  "commands": ["go", "go"]
+}

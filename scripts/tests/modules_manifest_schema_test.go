@@ -36,6 +36,17 @@ func checkSchema(schema map[string]any, v any, path string) []string {
 			return errs
 		}
 	}
+	if branches, ok := schema["anyOf"].([]any); ok {
+		matched := false
+		for _, b := range branches {
+			if sub, ok := b.(map[string]any); ok && len(checkSchema(sub, v, path)) == 0 {
+				matched = true
+			}
+		}
+		if !matched {
+			add("%v matches none of the allowed forms", v)
+		}
+	}
 	if enum, ok := schema["enum"].([]any); ok {
 		found := false
 		for _, e := range enum {
@@ -150,14 +161,17 @@ func readManifest(t *testing.T, fixture string) any {
 // Manifests the program accepts also satisfy the published schema.
 func TestValidManifestsSatisfyTheSchema(t *testing.T) {
 	schema := loadModuleSchema(t)
-	for _, name := range []string{"good-min", "good-full", "warn-reserved", "dup-a", "dup-b"} {
+	for _, name := range []string{"good-min", "good-full", "warn-reserved", "dup-a", "dup-b",
+		"host-points", "contrib-good", "contrib-two-hosts", "contrib-target-missing", "contrib-self",
+		"api10-contrib", "warn-requires", "good-string-length"} {
 		if errs := checkSchema(schema, readManifest(t, name), name); len(errs) != 0 {
 			t.Errorf("%s should satisfy the schema: %v", name, errs)
 		}
 	}
 	// Everything the program calls valid (staged from all fixtures) satisfies the schema.
-	all := stage(t, "good-min", "good-full", "warn-reserved", "api-probe", "api-denied", "helper-fails", "helper-hangs", "qml-good-window")
-	for _, m := range scanDirs(t, "", all) {
+	all := stage(t, "good-min", "good-full", "warn-reserved", "api-probe", "api-denied", "helper-fails", "helper-hangs", "qml-good-window",
+		"host-points", "contrib-good", "contrib-two-hosts", "contrib-target-missing", "contrib-self", "api10-contrib", "warn-requires", "good-string-length")
+	for _, m := range scanWithAPI(t, "", all, "1.1") {
 		if !m.Valid {
 			t.Errorf("%s should be valid: %+v", m.ID, m.Errors)
 			continue
@@ -171,7 +185,8 @@ func TestValidManifestsSatisfyTheSchema(t *testing.T) {
 // Manifests the schema can express as wrong are wrong in the schema, too.
 func TestSchemaRejectsWhatTheProgramRejects(t *testing.T) {
 	schema := loadModuleSchema(t)
-	for _, name := range []string{"err-bad-id", "err-missing-field", "err-bad-api", "err-bad-permission", "err-dup-permission", "err-bad-setting-default"} {
+	for _, name := range []string{"err-bad-id", "err-missing-field", "err-bad-api", "err-bad-permission", "err-dup-permission", "err-bad-setting-default",
+		"err-contrib-bad-target", "err-contrib-slash", "err-point-bad-id", "err-commands-bad", "err-commands-dup"} {
 		errs := checkSchema(schema, readManifest(t, name), name)
 		if name == "err-bad-setting-default" {
 			// The schema cannot tie a default to its type; the program checks that.
@@ -186,7 +201,13 @@ func TestSchemaRejectsWhatTheProgramRejects(t *testing.T) {
 // The permission names in the schema, the data model, and the program agree.
 func TestPermissionListsAgree(t *testing.T) {
 	schema := loadModuleSchema(t)
-	perms := schema["properties"].(map[string]any)["permissions"].(map[string]any)["items"].(map[string]any)["enum"].([]any)
+	// The fixed names are the first branch of the items' anyOf; the second is the form
+	// contribute:<module-id> (interface 1.1).
+	anyOf := schema["properties"].(map[string]any)["permissions"].(map[string]any)["items"].(map[string]any)["anyOf"].([]any)
+	perms := anyOf[0].(map[string]any)["enum"].([]any)
+	if pattern, _ := anyOf[1].(map[string]any)["pattern"].(string); pattern != "^contribute:[a-z][a-z0-9-]{1,31}$" {
+		t.Errorf("second permission form = %q", pattern)
+	}
 	var fromSchema []string
 	for _, p := range perms {
 		fromSchema = append(fromSchema, p.(string))

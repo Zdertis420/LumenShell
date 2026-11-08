@@ -1,0 +1,10 @@
+{
+  "id": "bar-item-target-missing",
+  "name": "Item for a module that is not installed",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:nope"],
+  "contributions": [
+    {"id": "x", "name": "X", "target": {"module": "nope", "point": "items"}, "file": "Item.qml"}
+  ]
+}

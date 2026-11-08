@@ -7,6 +7,9 @@
 | Go 1.27+ | Required to build | `make build` | No helper programs; the shell logs "run `make build`" and exits |
 | Qt 6 tools (`qmllint`, `qmlformat`) | Dev only | `make lint`, `make fmt` | Those targets fail; nothing else is affected |
 | matugen | Optional | `palette` helper, wallpaper source | The fallback palette is used and the reason is logged and shown as Theme `status` |
+| EasyEffects or `pavucontrol` | Optional | The sound item of the bar (left click) | The click logs `no audio mixer found`; level, volume and mute still work |
+| `notify-send` (libnotify) and a notification daemon | Optional | The notification about dropped list entries of the bar | Only the log entry is written |
+| Qt 6 `qmltestrunner` | Dev only | `make test` (QML unit tests of the bar) | `make test` fails with a clear message. On some systems `/usr/bin/qmltestrunner` is the Qt 5 runner, which prints nothing; the Makefile uses `/usr/lib/qt6/bin/qmltestrunner` when it exists |
 | `awww` / `swww` | Optional | `palette` helper, wallpaper detection | Set `theme.wallpaper` to a file path, or the fallback palette is used |
 
 Go dependencies: none. All Go programs use only the standard library.

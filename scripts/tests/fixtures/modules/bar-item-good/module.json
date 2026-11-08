@@ -1,0 +1,13 @@
+{
+  "id": "bar-item-good",
+  "name": "Good bar item",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:bar"],
+  "contributions": [
+    {"id": "good", "name": "Good", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"}
+  ],
+  "settings": {
+    "label": {"type": "string", "default": "Hi", "maxLength": 32}
+  }
+}

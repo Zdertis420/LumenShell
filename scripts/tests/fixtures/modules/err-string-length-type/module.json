@@ -1,0 +1,7 @@
+{
+  "id": "err-string-length-type",
+  "name": "minLength on an integer",
+  "version": "1.0.0",
+  "api": "1.1",
+  "settings": {"size": {"type": "integer", "default": 3, "minLength": 1}}
+}

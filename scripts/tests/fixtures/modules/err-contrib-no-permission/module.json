@@ -1,0 +1,9 @@
+{
+  "id": "err-contrib-no-permission",
+  "name": "Contribution without permission",
+  "version": "1.0.0",
+  "api": "1.1",
+  "contributions": [
+    {"id": "x", "name": "X", "target": {"module": "host-points", "point": "items"}, "file": "Item.qml"}
+  ]
+}

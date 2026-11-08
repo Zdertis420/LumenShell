@@ -1,0 +1,7 @@
+{
+  "id": "err-point-bad-id",
+  "name": "Extension point with a bad id",
+  "version": "1.0.0",
+  "api": "1.1",
+  "extensionPoints": [{"id": "Bad", "description": "a"}]
+}

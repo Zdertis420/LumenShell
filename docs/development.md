@@ -24,7 +24,8 @@ Contracts: `specs/001-foundation/contracts/`.
 ## Tests
 
 ```text
-make test      # go test scripts/tests/*_test.go (builds the programs itself)
+make test      # go test scripts/tests/*_test.go (builds the programs itself), then the QML unit tests
+make qmltest   # only the QML unit tests (scripts/tests/bar_*_test.qml, run by the Qt 6 qmltestrunner)
 make smoke     # scripts/tests/smoke.sh (needs a niri session)
 ```
 

@@ -3,6 +3,7 @@ package tests
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +25,18 @@ func TestSettingRulesAgreeBetweenModulesAndConfig(t *testing.T) {
 		{map[string]any{"type": "number", "min": 0, "max": 1}, []any{0.0, 0.5, 1.0, -0.1, 1.1, "1", false}, []bool{true, true, true, false, false, false, false}},
 		{map[string]any{"type": "number"}, []any{-3.5, 0.0, 1e6, "x"}, []bool{true, true, true, false}},
 		{map[string]any{"type": "boolean"}, []any{true, false, "true", 1.0, nil}, []bool{true, true, false, false, false}},
+		// Interface 1.1: string length limits (counted in characters) ...
+		{map[string]any{"type": "string", "minLength": 1, "maxLength": 3}, []any{"a", "abc", "ééé", "", "abcd", "éééé", 5.0},
+			[]bool{true, true, true, false, false, false, false}},
+		{map[string]any{"type": "string", "maxLength": 2}, []any{"", "ab", "abc"}, []bool{true, true, false}},
+		// ... and the stringlist type. A value is valid only if the list and every entry are
+		// valid: the modules program refuses a bad default, and the config helper reports each
+		// dropped entry as an error, so both give the same verdict.
+		{map[string]any{"type": "stringlist", "maxItems": 3},
+			[]any{[]any{"a", "b"}, []any{}, []any{"a", "b", "c"}, []any{"a", "b", "c", "d"}, "a", 7.0, []any{"a", 7.0}, []any{""},
+				[]any{strings.Repeat("x", 80)}, []any{strings.Repeat("x", 81)}},
+			[]bool{true, true, true, false, false, false, false, false, true, false}},
+		{map[string]any{"type": "stringlist"}, []any{[]any{"ok"}, []any{"éé"}}, []bool{true, true}},
 	}
 
 	user := t.TempDir()
@@ -83,6 +96,15 @@ func TestSettingRulesAgreeBetweenModulesAndConfig(t *testing.T) {
 			okDefault = 0.0
 		case "boolean":
 			okDefault = false
+		case "stringlist":
+			okDefault = []any{}
+		}
+		if c.rule["type"] == "string" {
+			if _, hasMin := c.rule["minLength"]; hasMin {
+				okDefault = "a"
+			} else if _, hasMax := c.rule["maxLength"]; hasMax {
+				okDefault = ""
+			}
 		}
 		rule["default"] = okDefault
 		def := map[string]any{"id": c.id, "defaultEnabled": false, "settings": map[string]any{"value": rule}}

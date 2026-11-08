@@ -1,0 +1,20 @@
+#!/bin/sh
+# Sends one desktop notification through notify-send (libnotify) and answers at once (module
+# helper contract, specs/003-bar/contracts/helper-bar.md). Input: {"summary": "...", "body": "..."}.
+# Without notify-send the answer is the no_notifier error and the bar only logs.
+
+input=$(cat)
+field() {
+	printf '%s' "$input" | sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed 's/^\(.\{0,200\}\).*/\1/'
+}
+summary=$(field summary)
+body=$(field body)
+
+if ! command -v notify-send >/dev/null 2>&1; then
+	echo '{"ok":false,"protocol":1,"error":{"code":"no_notifier","message":"notify-send is not installed; install libnotify to get notifications"}}'
+	exit 0
+fi
+
+# Detached, so this helper exits at once.
+setsid notify-send -- "$summary" "$body" </dev/null >/dev/null 2>&1 &
+echo '{"ok":true,"protocol":1,"data":{}}'

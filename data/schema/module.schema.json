@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://lumen.invalid/schema/module.schema.json",
-  "title": "Lumen module manifest (module.json), module interface 1.0",
-  "description": "Unknown top-level fields are allowed and reported as warnings. The fields extensionPoints, contributions and requires are reserved: accepted, ignored, and reported as a warning. Rules that JSON Schema cannot express (duplicate ids, interface compatibility, file existence, helper paths) are checked by the modules program.",
+  "title": "Lumen module manifest (module.json), module interface 1.1",
+  "description": "Unknown top-level fields are allowed and reported as warnings. The field requires is reserved: accepted, ignored, and reported as a warning. Rules that JSON Schema cannot express (duplicate ids, interface compatibility, file existence, helper paths, the contribute:<module> permission for every contribution target) are checked by the modules program.",
   "type": "object",
   "required": ["id", "name", "version", "api"],
   "additionalProperties": true,
@@ -39,7 +39,10 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "enum": ["helpers", "config.read", "config.write", "log.read", "modules.read-settings", "network"]
+        "anyOf": [
+          {"enum": ["helpers", "config.read", "config.write", "log.read", "modules.read-settings", "network"]},
+          {"pattern": "^contribute:[a-z][a-z0-9-]{1,31}$"}
+        ]
       }
     },
     "settings": {
@@ -54,7 +57,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["string", "integer", "number", "boolean"]
+            "enum": ["string", "integer", "number", "boolean", "stringlist"]
           },
           "default": {},
           "enum": {
@@ -63,6 +66,9 @@
           },
           "min": {"type": "number"},
           "max": {"type": "number"},
+          "minLength": {"type": "integer", "minimum": 0, "maximum": 4096},
+          "maxLength": {"type": "integer", "minimum": 0, "maximum": 4096},
+          "maxItems": {"type": "integer", "minimum": 1, "maximum": 64},
           "description": {
             "type": "string",
             "maxLength": 160
@@ -88,8 +94,45 @@
         }
       }
     },
-    "extensionPoints": {},
-    "contributions": {},
+    "extensionPoints": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+          "description": {"type": "string", "maxLength": 160}
+        }
+      }
+    },
+    "contributions": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "target", "file"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 64},
+          "target": {
+            "type": "object",
+            "required": ["module", "point"],
+            "properties": {
+              "module": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$"},
+              "point": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}
+            }
+          },
+          "file": {"type": "string", "pattern": "^[^/].*\\.qml$"}
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}
+    },
     "requires": {}
   }
 }

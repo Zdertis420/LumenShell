@@ -1,0 +1,10 @@
+{
+  "id": "err-point-dup",
+  "name": "Duplicate extension point ids",
+  "version": "1.0.0",
+  "api": "1.1",
+  "extensionPoints": [
+    {"id": "items", "description": "a"},
+    {"id": "items", "description": "b"}
+  ]
+}

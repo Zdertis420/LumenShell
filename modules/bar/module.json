@@ -1,0 +1,21 @@
+{
+  "id": "bar",
+  "name": "Bar",
+  "version": "1.0.0",
+  "api": "1.1",
+  "description": "A bar along a screen edge with three places (left, center, right) for items that other modules contribute. Which items appear is set in the configuration file.",
+  "permissions": ["helpers"],
+  "helpers": [{"name": "notify", "path": "bin/notify"}],
+  "extensionPoints": [
+    {"id": "items", "description": "Items shown in the bar"}
+  ],
+  "commands": ["focus"],
+  "settings": {
+    "edge": {"type": "string", "default": "top", "enum": ["top", "bottom"], "description": "Screen edge the bar sits on"},
+    "screens": {"type": "stringlist", "default": ["all"], "description": "Output names the bar appears on; all means every screen"},
+    "left": {"type": "stringlist", "default": [], "description": "Item names in the left place, in order"},
+    "center": {"type": "stringlist", "default": ["bar-clock"], "description": "Item names in the center place, in order"},
+    "right": {"type": "stringlist", "default": ["bar-sound", "bar-battery"], "description": "Item names in the right place, in order"},
+    "focusScreen": {"type": "string", "default": "", "maxLength": 64, "description": "Output name that receives keyboard focus from the focus command; empty means the first bar"}
+  }
+}

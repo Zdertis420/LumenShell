@@ -82,11 +82,11 @@ func run(ctx context.Context, args []string) int {
 	// Validate arguments before touching the system.
 	var theme string
 	var temp, reset bool
-	var sub, modID string
+	var sub, modID, modArg string
 	switch cmd {
 	case "modules":
 		var f *failure
-		sub, modID, f = parseModules(rest)
+		sub, modID, modArg, f = parseModules(rest)
 		if f != nil {
 			return report(f)
 		}
@@ -120,14 +120,14 @@ func run(ctx context.Context, args []string) int {
 	case "theme":
 		f = c.theme(theme, temp, reset)
 	case "modules":
-		f = c.modules(sub, modID)
+		f = c.modules(sub, modID, modArg)
 	}
 	return report(f)
 }
 
 func usage() string {
 	return "usage: lumen start | lumen theme <theme> [--temp] | lumen theme --reset | lumen version |\n" +
-		"       lumen modules list | show <id> | enable <id> | disable <id> | reload <id> | rescan"
+		"       lumen modules list | show <id> | enable <id> | disable <id> | reload <id> | rescan | call <id> <command>"
 }
 
 func report(f *failure) int {
@@ -441,38 +441,78 @@ var (
 	moduleDirIDPattern = regexp.MustCompile(`^dir:[A-Za-z0-9._-]{1,64}$`)
 )
 
-const modulesUsage = "usage: lumen modules list | show <id> | enable <id> | disable <id> | reload <id> | rescan"
+const modulesUsage = "usage: lumen modules list | show <id> | enable <id> | disable <id> | reload <id> | rescan | call <id> <command>"
+
+// commandPattern is the shape of a module command name (interface 1.1).
+var commandPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
 // parseModules validates the arguments of `lumen modules ...` before anything is contacted.
-func parseModules(args []string) (sub, id string, f *failure) {
+// arg is the command name for `call`.
+func parseModules(args []string) (sub, id, arg string, f *failure) {
 	if len(args) == 0 {
-		return "", "", fail(exitUsage, "modules needs a subcommand\n%s", modulesUsage)
+		return "", "", "", fail(exitUsage, "modules needs a subcommand\n%s", modulesUsage)
 	}
 	sub = args[0]
 	switch sub {
 	case "list", "rescan":
 		if len(args) != 1 {
-			return "", "", fail(exitUsage, "modules %s takes no arguments", sub)
+			return "", "", "", fail(exitUsage, "modules %s takes no arguments", sub)
 		}
-		return sub, "", nil
+		return sub, "", "", nil
 	case "show", "enable", "disable", "reload":
 		if len(args) != 2 {
-			return "", "", fail(exitUsage, "modules %s needs exactly one module id", sub)
+			return "", "", "", fail(exitUsage, "modules %s needs exactly one module id", sub)
 		}
 		id = args[1]
 		if !moduleIDPattern.MatchString(id) && !moduleDirIDPattern.MatchString(id) {
-			return "", "", fail(exitUsage, "invalid module id %q", id)
+			return "", "", "", fail(exitUsage, "invalid module id %q", id)
 		}
-		return sub, id, nil
+		return sub, id, "", nil
+	case "call":
+		if len(args) != 3 {
+			return "", "", "", fail(exitUsage, "modules call needs a module id and a command\n%s", modulesUsage)
+		}
+		id, arg = args[1], args[2]
+		if !moduleIDPattern.MatchString(id) {
+			return "", "", "", fail(exitUsage, "invalid module id %q", id)
+		}
+		if !commandPattern.MatchString(arg) {
+			return "", "", "", fail(exitUsage, "invalid command name %q", arg)
+		}
+		return sub, id, arg, nil
 	}
-	return "", "", fail(exitUsage, "unknown modules subcommand %q\n%s", sub, modulesUsage)
+	return "", "", "", fail(exitUsage, "unknown modules subcommand %q\n%s", sub, modulesUsage)
 }
 
-func (c *controller) modules(sub, id string) *failure {
+// modulesCall asks a module to run one of its declared commands and prints the answer.
+func (c *controller) modulesCall(id, command string) *failure {
+	reply, f := c.callChecked("moduleCall", id, command)
+	if f != nil {
+		return f
+	}
+	if strings.HasPrefix(reply, "error:") {
+		return c.finish(reply)
+	}
+	var out struct {
+		OK     bool   `json:"ok"`
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(reply), &out); err != nil || !out.OK {
+		return fail(exitShellFailed, "unexpected reply from the shell: %q", reply)
+	}
+	if out.Result != "" {
+		fmt.Println(out.Result)
+	}
+	return nil
+}
+
+func (c *controller) modules(sub, id, arg string) *failure {
 	if f := c.connect(); f != nil {
 		return f
 	}
 	switch sub {
+	case "call":
+		return c.modulesCall(id, arg)
 	case "list":
 		return c.modulesList()
 	case "show":
@@ -571,6 +611,7 @@ func (c *controller) modulesList() *failure {
 			RuntimeErrors int      `json:"runtimeErrors"`
 			LastError     string   `json:"lastError"`
 			Warnings      []any    `json:"warnings"`
+			Notes         []string `json:"notes"` // interface 1.1: "contributes to bar", "hosts: items"
 		} `json:"modules"`
 	}
 	if err := json.Unmarshal([]byte(reply), &list); err != nil {
@@ -596,6 +637,7 @@ func (c *controller) modulesList() *failure {
 		if len(m.Warnings) > 0 {
 			notes = append(notes, plural(len(m.Warnings), "warning", "warnings"))
 		}
+		notes = append(notes, m.Notes...)
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", m.ID, m.Version, m.Origin, m.State, strings.Join(notes, "; "))
 	}
 	w.Flush()
@@ -694,6 +736,7 @@ func (c *controller) modulesShow(id string) *failure {
 		m, _ := v.(map[string]any)
 		return fmt.Sprintf("%s: %s (fallback: %v)", str(m, "key"), str(m, "problem"), m["fallback"])
 	})
+	printInterface11(d)
 	runtime, _ := d["runtimeErrors"].(float64)
 	fmt.Printf("runtime errors: %d\n", int(runtime))
 	if last := str(d, "lastError"); last != "" {
@@ -705,6 +748,77 @@ func (c *controller) modulesShow(id string) *failure {
 func anyList(v any) []any {
 	l, _ := v.([]any)
 	return l
+}
+
+// stateText is "state" or "state (reason)".
+func stateText(m map[string]any) string {
+	if reason := str(m, "reason"); reason != "" {
+		return str(m, "state") + " (" + reason + ")"
+	}
+	return str(m, "state")
+}
+
+// printInterface11 prints what interface 1.1 adds to `lumen modules show`: the module's own
+// contributions, its extension points with the contributions to them, its commands, and what
+// a host reported (dropped items and item warnings). A section is printed only when the reply
+// has it, so an older shell's reply prints as before.
+func printInterface11(d map[string]any) {
+	if list := anyList(d["contributions"]); len(list) > 0 {
+		fmt.Println("Contributions:")
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "  ITEM NAME\tSHORT NAME\tTARGET\tSTATE")
+		for _, it := range list {
+			c, _ := it.(map[string]any)
+			target, _ := c["target"].(map[string]any)
+			fmt.Fprintf(w, "  %s\t%s\t%s/%s\t%s\n", str(c, "key"), str(c, "short"), str(target, "module"), str(target, "point"), stateText(c))
+		}
+		w.Flush()
+	}
+	if list := anyList(d["extensionPoints"]); len(list) > 0 {
+		fmt.Println("Extension points:")
+		for _, it := range list {
+			p, _ := it.(map[string]any)
+			contribs := anyList(p["contributions"])
+			shown := 0
+			for _, ci := range contribs {
+				if c, _ := ci.(map[string]any); str(c, "state") == "shown" {
+					shown++
+				}
+			}
+			fmt.Printf("  %s  %s  contributions: %d (shown %d)\n", str(p, "id"), str(p, "description"), len(contribs), shown)
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			for _, ci := range contribs {
+				c, _ := ci.(map[string]any)
+				fmt.Fprintf(w, "    %s\t%s\t%s\n", str(c, "key"), str(c, "short"), stateText(c))
+			}
+			w.Flush()
+		}
+	}
+	if list := anyList(d["commands"]); len(list) > 0 {
+		fmt.Println("Commands:")
+		for _, c := range list {
+			fmt.Println("  " + fmt.Sprint(c))
+		}
+	}
+	for _, it := range anyList(d["dropped"]) {
+		m, _ := it.(map[string]any)
+		names := []string{}
+		for _, n := range anyList(m["items"]) {
+			names = append(names, fmt.Sprint(n))
+		}
+		if len(names) > 0 {
+			fmt.Printf("Dropped items (screen %s): %s\n", str(m, "screen"), strings.Join(names, ", "))
+		}
+	}
+	if list := anyList(d["itemWarnings"]); len(list) > 0 {
+		fmt.Println("Item warnings:")
+		for _, it := range list {
+			m, _ := it.(map[string]any)
+			entry, _ := json.Marshal(m["entry"])
+			index, _ := m["index"].(float64)
+			fmt.Printf("  %s[%d]: %s: %s\n", str(m, "place"), int(index), entry, str(m, "problem"))
+		}
+	}
 }
 
 // forwardLog sends one entry to the shell's log stream. Best effort: errors are ignored,

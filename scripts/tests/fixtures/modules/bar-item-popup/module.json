@@ -1,0 +1,11 @@
+{
+  "id": "bar-item-popup",
+  "name": "Item with a popup, driven by commands",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:bar"],
+  "commands": ["open", "close", "state", "cycle"],
+  "contributions": [
+    {"id": "x", "name": "X", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"}
+  ]
+}

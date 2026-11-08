@@ -136,7 +136,37 @@ Users change settings in `~/.config/lumen/config.json`, under your module's id:
 - After fixing a module, run `lumen modules reload <id>`. This re-reads the manifest and the entry file.
 - If you only changed a secondary QML file of your module (not `Main.qml`), restart the shell: the engine caches those files.
 
-## 8. The trust model
+## 8. Putting an item in the bar
+
+Since module interface 1.1 a module can add an item to another module's extension point. The bar declares one, `bar/items`. Copy `examples/hello-bar-item/` (a manifest, an empty `Main.qml`, and `Item.qml`) and follow these steps.
+
+1. **Declare the contribution** in `module.json`, and the permission that goes with it:
+
+   ```json
+   "api": "1.1",
+   "permissions": ["contribute:bar"],
+   "contributions": [
+     {"id": "greeting", "name": "Greeting", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"}
+   ]
+   ```
+
+   The permission `contribute:<module-id>` is required for every module you contribute to, and it is shown to the user before the module is enabled.
+
+2. **Write the item.** The root is any `Item` with `required property var api` (your own interface object: theme, style, log, settings) and `property var slot` (what the bar tells the item: `edge`, `thickness`, `maxWidth`, `screenName`, `place`). Size it with `implicitWidth` and `slot.thickness`, and take colors and sizes from `api.theme` and `api.style`. The bar creates one instance per bar.
+
+3. **Enable the module, then name the item.** Enabling does not place anything. Add its name to one of the bar's lists in the configuration file (`modules.bar.left`, `center` or `right`):
+
+   ```json
+   {"modules": {"bar": {"left": ["hello-bar-item"]}}}
+   ```
+
+   The name is the module id (for the first item the module declares for the bar), or `module-id/item-id` for any item. If you name an item whose module is not enabled yet, the bar skips it and says which `lumen modules enable` command to run.
+
+4. **Check it.** `lumen modules show hello-bar-item` prints the item's state: `shown`, `available` (loaded but not named in a list), `waiting` (with the reason) or `rejected`. `lumen modules show bar` lists every item with its name and the warnings for entries the bar skipped.
+
+An item that fails to load, or logs three errors in the first five seconds, is unloaded and marked failed like any module; the bar and the other items keep working. Reload it with `lumen modules reload <id>` after fixing it. See [bar.md](bar.md) for the bar's settings, and [module-api.md](module-api.md) for the interface.
+
+## 9. The trust model
 
 A module is code that runs inside your shell. Permissions control what the `api` object does for it, and `lumen modules` shows them before you enable anything, but they are not a sandbox. Do not enable modules you do not trust.
 

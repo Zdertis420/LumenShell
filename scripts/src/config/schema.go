@@ -7,20 +7,32 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
+)
+
+// Limits of the "stringlist" setting type (module interface 1.1, specs/003-bar).
+const (
+	defaultMaxListItems = 64
+	maxListEntryChars   = 80
 )
 
 // rule describes one known config key. These rules are compiled in so a missing
 // data directory cannot break validation. They must match
 // data/schema/config.schema.json (a test checks this).
 type rule struct {
-	key    string
-	kind   string   // "string", "int", "number", or "boolean"
-	enum   []string // allowed strings; nil means any string
-	min    float64
-	max    float64
-	hasMin bool
-	hasMax bool
-	def    any
+	key       string
+	kind      string   // "string", "int", "number", "boolean", or "stringlist"
+	enum      []string // allowed strings; nil means any string
+	min       float64
+	max       float64
+	hasMin    bool
+	hasMax    bool
+	minLen    int // "string" only: limits in characters
+	maxLen    int
+	hasMinLen bool
+	hasMaxLen bool
+	maxItems  int // "stringlist" only
+	def       any
 }
 
 var schemes = []string{
@@ -106,6 +118,24 @@ func moduleRule(key string, raw any) (rule, bool) {
 				if s, ok := e.(string); ok {
 					r.enum = append(r.enum, s)
 				}
+			}
+		}
+		if n, ok := m["minLength"].(json.Number); ok {
+			if f, err := n.Int64(); err == nil {
+				r.minLen, r.hasMinLen = int(f), true
+			}
+		}
+		if n, ok := m["maxLength"].(json.Number); ok {
+			if f, err := n.Int64(); err == nil {
+				r.maxLen, r.hasMaxLen = int(f), true
+			}
+		}
+	case "stringlist":
+		r.kind = "stringlist"
+		r.maxItems = defaultMaxListItems
+		if n, ok := m["maxItems"].(json.Number); ok {
+			if f, err := n.Int64(); err == nil && f >= 1 && f <= defaultMaxListItems {
+				r.maxItems = int(f)
 			}
 		}
 	case "integer":
@@ -204,10 +234,23 @@ func (r *rule) check(v any, dataDir string) string {
 		if _, ok := v.(bool); !ok {
 			return "must be true or false"
 		}
+	case "stringlist":
+		// Only the list as a whole is checked here. Single bad entries are dropped on read
+		// (filterList), so a write never fails because of them.
+		list, ok := v.([]any)
+		if !ok {
+			return "must be a list of strings"
+		}
+		if len(list) > r.maxItems {
+			return fmt.Sprintf("must have at most %d entries", r.maxItems)
+		}
 	default:
 		s, ok := v.(string)
 		if !ok {
 			return "must be a string"
+		}
+		if n := utf8.RuneCountInString(s); (r.hasMinLen && n < r.minLen) || (r.hasMaxLen && n > r.maxLen) {
+			return "must be a string" + r.lengthText()
 		}
 		if allowed := r.allowed(dataDir); allowed != nil {
 			for _, a := range allowed {
@@ -219,6 +262,59 @@ func (r *rule) check(v any, dataDir string) string {
 		}
 	}
 	return ""
+}
+
+func (r *rule) lengthText() string {
+	switch {
+	case r.hasMinLen && r.hasMaxLen:
+		return fmt.Sprintf(" of %d to %d characters", r.minLen, r.maxLen)
+	case r.hasMinLen:
+		return fmt.Sprintf(" of at least %d characters", r.minLen)
+	case r.hasMaxLen:
+		return fmt.Sprintf(" of at most %d characters", r.maxLen)
+	}
+	return ""
+}
+
+// droppedEntry is one entry of a stringlist value that was left out.
+type droppedEntry struct {
+	index   int
+	problem string
+	value   any
+}
+
+// filterList keeps the valid entries of a stringlist value (non-empty strings of at most
+// 80 characters), in order, and reports the others. The result is never nil.
+func (r *rule) filterList(v any) ([]any, []droppedEntry) {
+	list, _ := v.([]any)
+	kept := make([]any, 0, len(list))
+	var dropped []droppedEntry
+	for i, item := range list {
+		s, ok := item.(string)
+		switch {
+		case !ok:
+			dropped = append(dropped, droppedEntry{i, "is not a string; entry dropped", cutValue(item)})
+		case s == "":
+			dropped = append(dropped, droppedEntry{i, "is empty; entry dropped", s})
+		case utf8.RuneCountInString(s) > maxListEntryChars:
+			dropped = append(dropped, droppedEntry{i, fmt.Sprintf("is longer than %d characters; entry dropped", maxListEntryChars), cutValue(s)})
+		default:
+			kept = append(kept, s)
+		}
+	}
+	return kept, dropped
+}
+
+// cutValue shortens a reported value to 80 characters. Non-strings are reported as written.
+func cutValue(v any) any {
+	s, ok := v.(string)
+	if !ok {
+		return v
+	}
+	if utf8.RuneCountInString(s) <= maxListEntryChars {
+		return s
+	}
+	return string([]rune(s)[:maxListEntryChars])
 }
 
 func (r *rule) inRange(f float64) bool {

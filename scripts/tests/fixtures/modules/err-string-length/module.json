@@ -1,0 +1,7 @@
+{
+  "id": "err-string-length",
+  "name": "string default shorter than minLength",
+  "version": "1.0.0",
+  "api": "1.1",
+  "settings": {"word": {"type": "string", "default": "", "minLength": 1}}
+}

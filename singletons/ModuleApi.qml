@@ -86,7 +86,9 @@ QtObject {
                     out.push({
                     "key": e.key.substring(prefix.length),
                     "problem": e.problem,
-                    "fallback": e.fallback
+                    "fallback": e.fallback,
+                    "dropped": e.dropped === true,
+                    "value": e.value
                 });
 
             }
@@ -150,6 +152,105 @@ QtObject {
                 return undefined;
             }
             return Config.value("modules." + id);
+        }
+
+    }
+
+    // Commands (interface 1.1): a module assigns `handler`, a function (name, args) -> text,
+    // which runs when `lumen modules call <id> <name>` reaches it. Only the names the
+    // manifest declares under "commands" can arrive.
+    readonly property QtObject
+    commands: QtObject {
+        property var handler: null
+    }
+
+    // Extension points (interface 1.1, specs/003-bar/contracts/module-api-1.1.md). Host side:
+    // read the contributions to this module's points, create and destroy their items, refuse
+    // some, report state, and resolve the user's lists of item names. A module that does not
+    // declare a point gets an empty result for it.
+    readonly property QtObject
+    extensions: QtObject {
+        readonly property var points: api.manifest.extensionPoints ?? []
+
+        function declares(pointId: string) : bool {
+            return points.some((p) => {
+                return p.id === pointId;
+            });
+        }
+
+        // The contributions that target one of this module's points. Reactive.
+        function contributions(pointId: string) : variant {
+            if (!api.host || !declares(pointId))
+                return [];
+
+            return api.host.contributionsTo(api.moduleId, pointId);
+        }
+
+        // Turns a long or short item name into the long form, or "" when nothing matches.
+        function keyOf(pointId: string, itemRef: string) : string {
+            for (const c of contributions(pointId)) {
+                if (c.key === itemRef || (c.short !== "" && c.short === itemRef))
+                    return c.key;
+
+            }
+            return "";
+        }
+
+        function create(pointId: string, itemRef: string, parent, slot) : variant {
+            if (!api.alive || !api.host)
+                return null;
+
+            if (!declares(pointId)) {
+                api.log.warn("api.extensions.create: this module declares no extension point '" + pointId + "'");
+                return null;
+            }
+            const key = keyOf(pointId, itemRef);
+            if (key === "") {
+                api.log.warn("api.extensions.create: no item '" + itemRef + "' for point '" + pointId + "'");
+                return null;
+            }
+            return api.host.createItem(api.moduleId, pointId, key, parent, slot);
+        }
+
+        // Not named destroy: QML objects have a built-in destroy() that would shadow it.
+        function destroyItem(item) : bool {
+            return api.host ? api.host.destroyItem(item) : false;
+        }
+
+        function reject(pointId: string, itemRef: string, reason: string) {
+            if (!api.host || !declares(pointId))
+                return ;
+
+            const key = keyOf(pointId, itemRef);
+            if (key === "") {
+                api.log.warn("api.extensions.reject: no item '" + itemRef + "' for point '" + pointId + "'");
+                return ;
+            }
+            api.host.rejectItem(api.moduleId, pointId, key, String(reason));
+        }
+
+        function report(pointId: string, info) {
+            if (api.host && declares(pointId))
+                api.host.setReport(api.moduleId, pointId, info);
+
+        }
+
+        // lists: {left, center, right}. callback({lists, warnings, available}) or callback({error}).
+        function resolve(pointId: string, lists, callback) {
+            if (!api.host || !declares(pointId)) {
+                if (callback)
+                    callback({
+                    "error": "this module declares no extension point '" + pointId + "'"
+                });
+
+                return ;
+            }
+            api.host.resolveItems(api.moduleId, pointId, lists, (result) => {
+                // api is null once this module has been unloaded.
+                if (api && api.alive && callback)
+                    callback(result);
+
+            });
         }
 
     }

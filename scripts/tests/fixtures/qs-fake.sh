@@ -67,6 +67,10 @@ ipc)
 			echo "error: unknown: unknown module '$id'"
 		fi
 		;;
+	moduleCall)
+		# FAKE_QS_CALL_REPLY holds the reply; the arguments are recorded by the call log.
+		echo "${FAKE_QS_CALL_REPLY:-{\"ok\":true,\"result\":\"ok\"\}}"
+		;;
 	moduleEnable | moduleDisable | moduleReload | modulesRescan)
 		id="$5"
 		if [ "$fn" != "modulesRescan" ] && [ -n "$FAKE_QS_MODULES_DIR" ] && [ ! -f "$FAKE_QS_MODULES_DIR/$id.json" ]; then

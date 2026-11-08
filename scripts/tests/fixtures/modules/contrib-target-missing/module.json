@@ -1,0 +1,10 @@
+{
+  "id": "contrib-target-missing",
+  "name": "Contributor to a missing module",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:nope"],
+  "contributions": [
+    {"id": "orphan", "name": "Orphan", "target": {"module": "nope", "point": "items"}, "file": "Item.qml"}
+  ]
+}

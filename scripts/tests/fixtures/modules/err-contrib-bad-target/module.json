@@ -1,0 +1,9 @@
+{
+  "id": "err-contrib-bad-target",
+  "name": "Contribution with a bad target id",
+  "version": "1.0.0",
+  "api": "1.1",
+  "contributions": [
+    {"id": "x", "name": "X", "target": {"module": "Bad Id", "point": "items"}, "file": "Item.qml"}
+  ]
+}

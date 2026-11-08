@@ -1,0 +1,10 @@
+{
+  "id": "bar-item-wrong-point",
+  "name": "Item for a point the bar does not declare",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:bar"],
+  "contributions": [
+    {"id": "x", "name": "X", "target": {"module": "bar", "point": "nothing"}, "file": "Item.qml"}
+  ]
+}

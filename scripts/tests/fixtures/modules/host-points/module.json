@@ -1,0 +1,14 @@
+{
+  "id": "host-points",
+  "name": "Host with extension points",
+  "version": "1.0.0",
+  "api": "1.1",
+  "extensionPoints": [
+    {"id": "items", "description": "x"},
+    {"id": "tools", "description": "y"}
+  ],
+  "commands": ["focus", "reset"],
+  "settings": {
+    "left": {"type": "stringlist", "default": ["a"], "maxItems": 3}
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "bar-item-two",
+  "name": "Module with two bar items",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:bar"],
+  "contributions": [
+    {"id": "a", "name": "A", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"},
+    {"id": "b", "name": "B", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"}
+  ]
+}
