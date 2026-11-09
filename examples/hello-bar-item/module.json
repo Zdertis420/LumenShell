@@ -1,14 +1,15 @@
 {
   "id": "hello-bar-item",
   "name": "Hello bar item",
-  "version": "1.0.0",
-  "api": "1.1",
+  "version": "1.1.0",
+  "api": "1.2",
   "description": "A small item for the bar. Copy this directory to write your own.",
   "permissions": ["contribute:bar"],
   "contributions": [
     {"id": "greeting", "name": "Greeting", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"}
   ],
   "settings": {
-    "text": {"type": "string", "default": "Hello", "minLength": 1, "maxLength": 32, "description": "Text shown in the bar"}
+    "text": {"type": "string", "default": "Hello", "minLength": 1, "maxLength": 32, "description": "Text shown in the bar"},
+    "fontSize": {"type": "integer", "default": null, "min": 1, "max": 96, "description": "Text size of this item; unset follows the bar (an example of an unset default)"}
   }
 }

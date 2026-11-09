@@ -22,8 +22,9 @@ Singleton {
     id: root
 
     // The module interface version Lumen provides (major.minor). 1.1 added extension points,
-    // contributions, module commands, and the stringlist setting type (specs/003-bar).
-    readonly property string apiVersion: "1.1"
+    // contributions, module commands, and the stringlist setting type (specs/003-bar). 1.2 added
+    // unset settings (a null default) and the bar's placement facts (specs/004-bar-customization-styles).
+    readonly property string apiVersion: "1.2"
     // Module records (plain objects, see specs/002-modules/data-model.md). Replaced as a
     // whole on every change, so bindings update.
     property var list: []
@@ -50,6 +51,10 @@ Singleton {
     property bool followerStarted: false
     property int followerFailures: 0
     property double followerStart: 0
+    // True once the follower has printed a line. A follower that exits before that (the shell is
+    // not registered with `qs log` yet, early in start-up) is restarted from the start of the
+    // log, so runtime errors logged in the meantime are not missed.
+    property bool followerHadOutput: false
     // ---- interface 1.1: extension points and contributions ----
     // Bumped whenever an item is created, destroyed, or refused, so bindings that read
     // contribution states update.
@@ -424,15 +429,19 @@ Singleton {
         });
         let dropped = [];
         let itemWarnings = [];
+        let lookWarnings = [];
         for (const p of (rec.extensionPoints ?? [])) {
             const report = root.reports[rec.id + "|" + p.id];
             if (report) {
                 dropped = dropped.concat(report.dropped ?? []);
                 itemWarnings = itemWarnings.concat(report.warnings ?? []);
+                lookWarnings = lookWarnings.concat(report.lookWarnings ?? []);
             }
         }
         detail.dropped = dropped;
         detail.itemWarnings = itemWarnings;
+        // Interface 1.2: warnings about the host's own look settings ([{key, problem}]).
+        detail.lookWarnings = lookWarnings;
         return detail;
     }
 
@@ -1034,6 +1043,11 @@ Singleton {
         }
         delete root.live[rec.id];
         root.writeLog("info", rec, "unloaded", null);
+        // Let the engine free what the module left as garbage now, not at some later collection:
+        // repeated reloads of a large module (the bar) otherwise pile it up.
+        Qt.callLater(() => {
+            return gc();
+        });
     }
 
     Component {
@@ -1053,6 +1067,7 @@ Singleton {
 
         stdout: SplitParser {
             onRead: (line) => {
+                root.followerHadOutput = true;
                 return root.onLogLine(line);
             }
         }
@@ -1063,7 +1078,7 @@ Singleton {
         id: restartFollower
 
         interval: 500
-        onTriggered: root.runFollower(true)
+        onTriggered: root.runFollower(root.followerHadOutput)
     }
 
     // The user can switch modules on and off by editing the config file, too.

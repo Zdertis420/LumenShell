@@ -333,6 +333,12 @@ func checkSetting(key string, raw any, addErr func(field, format string, a ...an
 		addErr(field+".default", "is required")
 		return
 	}
+	// Interface 1.2: a null default means "unset" (the module falls back to a design token).
+	// It is allowed for the four scalar types, not for a stringlist.
+	if def == nil && typ == "stringlist" {
+		addErr(field+".default", "must be a list of strings (null is not allowed for a stringlist)")
+		return
+	}
 	if d, ok := rule["description"]; ok {
 		if s, isStr := d.(string); !isStr || utf8.RuneCountInString(s) > 160 {
 			addErr(field+".description", "must be a string of at most 160 characters")
@@ -406,6 +412,9 @@ func checkSetting(key string, raw any, addErr func(field, format string, a ...an
 		} else {
 			maxItems = int(i)
 		}
+	}
+	if def == nil {
+		return
 	}
 	if p := checkSettingValue(typ, enum, min, max, minLen, maxLen, maxItems, def); p != "" {
 		addErr(field+".default", "%s", p)

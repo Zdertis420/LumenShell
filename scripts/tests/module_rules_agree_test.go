@@ -24,7 +24,9 @@ func TestSettingRulesAgreeBetweenModulesAndConfig(t *testing.T) {
 		{map[string]any{"type": "integer", "min": 10}, []any{10.0, 99.0, 9.0}, []bool{true, true, false}},
 		{map[string]any{"type": "number", "min": 0, "max": 1}, []any{0.0, 0.5, 1.0, -0.1, 1.1, "1", false}, []bool{true, true, true, false, false, false, false}},
 		{map[string]any{"type": "number"}, []any{-3.5, 0.0, 1e6, "x"}, []bool{true, true, true, false}},
-		{map[string]any{"type": "boolean"}, []any{true, false, "true", 1.0, nil}, []bool{true, true, false, false, false}},
+		// (null is left out on purpose: since interface 1.2 a null default is valid, meaning
+		// "unset", while a null user value is not. modules_null_default_test.go covers both.)
+		{map[string]any{"type": "boolean"}, []any{true, false, "true", 1.0}, []bool{true, true, false, false}},
 		// Interface 1.1: string length limits (counted in characters) ...
 		{map[string]any{"type": "string", "minLength": 1, "maxLength": 3}, []any{"a", "abc", "ééé", "", "abcd", "éééé", 5.0},
 			[]bool{true, true, true, false, false, false, false}},

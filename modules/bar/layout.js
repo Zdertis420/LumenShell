@@ -1,23 +1,43 @@
 .pragma library
 
-// The bar's fitting rule (FR-015a, specs/003-bar/research.md R10): when the items do not fit
-// the width of a screen, drop items from the end of the right list first, then the end of
-// the center list, then the end of the left list, one at a time, until the rest fit.
-// Pure functions over numbers: no QML types, so they can be unit tested without a shell.
+// The bar's fitting rule (FR-015a of Feature III, specs/003-bar/research.md R10), now along
+// either axis (specs/004-bar-customization-styles): when the items do not fit the length of a
+// screen, drop items from the end of the right list first, then the end of the center list,
+// then the end of the left list, one at a time, until the rest fit. "Length" is the width of
+// a horizontal bar and the height of a vertical one. Pure functions over numbers: no QML
+// types, so they can be unit tested without a shell.
 
 var PLACES = ["left", "center", "right"];
 // Items are dropped from the places in this order.
 var DROP_ORDER = ["right", "center", "left"];
 
-// The width of the first `count` items of a place, counting only the ones that take room
-// (a width of 0 or less means the item is not shown) and the gaps between those.
-function regionWidth(widths, count) {
+// opts is {itemGap, placeGap, placePadding}. A plain number means one gap for items and
+// places and no place padding (the shape of Feature III's calls).
+function normalize(opts) {
+    if (typeof opts === "number") {
+        return {
+            "itemGap": opts,
+            "placeGap": opts,
+            "placePadding": 0
+        };
+    }
+    var o = opts || {};
+    return {
+        "itemGap": o.itemGap || 0,
+        "placeGap": o.placeGap === undefined ? (o.itemGap || 0) : o.placeGap,
+        "placePadding": o.placePadding || 0
+    };
+}
+
+// The length of the first `count` items of a place, counting only the ones that take room
+// (a length of 0 or less means the item is not shown).
+function regionLength(lengths, count) {
     var shown = 0;
     var sum = 0;
-    for (var i = 0; i < count && i < widths.length; i++) {
-        if (widths[i] > 0) {
+    for (var i = 0; i < count && i < lengths.length; i++) {
+        if (lengths[i] > 0) {
             shown++;
-            sum += widths[i];
+            sum += lengths[i];
         }
     }
     return {
@@ -26,47 +46,50 @@ function regionWidth(widths, count) {
     };
 }
 
-// The total width of the bar for the given counts: the three regions plus a gap between
-// every two items and between every two regions that hold something.
-function totalWidth(widths, counts, gap) {
-    var regions = 0;
+// The length of one place for the given counts: its items, the item gaps between them, and
+// the place padding at both ends. 0 when it holds nothing.
+function widthOf(lengths, counts, place, opts) {
+    var o = normalize(opts);
+    var r = regionLength(lengths[place] || [], counts[place]);
+    return r.shown === 0 ? 0 : r.sum + o.itemGap * (r.shown - 1) + 2 * o.placePadding;
+}
+
+// The total length for the given counts: the three places plus a place gap between every
+// two places that hold something.
+function totalWidth(lengths, counts, opts) {
+    var o = normalize(opts);
+    var places = 0;
     var total = 0;
     for (var p = 0; p < PLACES.length; p++) {
-        var place = PLACES[p];
-        var r = regionWidth(widths[place] || [], counts[place]);
-        if (r.shown === 0)
+        var w = widthOf(lengths, counts, PLACES[p], o);
+        if (w === 0)
             continue;
-        regions++;
-        total += r.sum + gap * (r.shown - 1);
+        places++;
+        total += w;
     }
-    return total + (regions > 1 ? gap * (regions - 1) : 0);
+    return total + (places > 1 ? o.placeGap * (places - 1) : 0);
 }
 
-// The width of one region for the given counts (0 when it holds nothing).
-function widthOf(widths, counts, place, gap) {
-    var r = regionWidth(widths[place] || [], counts[place]);
-    return r.shown === 0 ? 0 : r.sum + gap * (r.shown - 1);
-}
-
-// fit(widths, available, gap):
-//   widths:    {left: [w, ...], center: [...], right: [...]}, the measured width of each item
+// fit(lengths, available, opts):
+//   lengths:   {left: [n, ...], center: [...], right: [...]}, the measured length of each item
 //              in list order (0 or less: not shown, takes no room)
-//   available: the width of the bar
-//   gap:       the space between two items and between two regions
+//   available: the length of the bar
+//   opts:      {itemGap, placeGap, placePadding} (or one number, see normalize)
 // Returns {left, center, right, dropped, centerX}:
 //   left, center, right: how many items of each list stay (the first n)
 //   dropped:  [{place, index}] in the order they were dropped
-//   centerX:  the x of the center region: centered on the bar when it fits there, otherwise
-//             between the other two regions
-function fit(widths, available, gap) {
+//   centerX:  the start of the center place: centered on the bar when it fits there, otherwise
+//             between the other two places
+function fit(lengths, available, opts) {
+    var o = normalize(opts);
     var counts = {
-        "left": (widths.left || []).length,
-        "center": (widths.center || []).length,
-        "right": (widths.right || []).length
+        "left": (lengths.left || []).length,
+        "center": (lengths.center || []).length,
+        "right": (lengths.right || []).length
     };
     var dropped = [];
 
-    while (totalWidth(widths, counts, gap) > available) {
+    while (totalWidth(lengths, counts, o) > available) {
         var progressed = false;
         for (var d = 0; d < DROP_ORDER.length; d++) {
             var place = DROP_ORDER[d];
@@ -74,7 +97,7 @@ function fit(widths, available, gap) {
                 counts[place]--;
                 var index = counts[place];
                 // An item that takes no room is not worth reporting.
-                if ((widths[place] || [])[index] > 0)
+                if ((lengths[place] || [])[index] > 0)
                     dropped.push({
                         "place": place,
                         "index": index
@@ -87,14 +110,14 @@ function fit(widths, available, gap) {
             break;
     }
 
-    var leftW = widthOf(widths, counts, "left", gap);
-    var centerW = widthOf(widths, counts, "center", gap);
-    var rightW = widthOf(widths, counts, "right", gap);
+    var leftW = widthOf(lengths, counts, "left", o);
+    var centerW = widthOf(lengths, counts, "center", o);
+    var rightW = widthOf(lengths, counts, "right", o);
     var centerX = 0;
     if (centerW > 0) {
         var centered = (available - centerW) / 2;
-        var leftEdge = leftW > 0 ? leftW + gap : 0;
-        var rightEdge = available - (rightW > 0 ? rightW + gap : 0);
+        var leftEdge = leftW > 0 ? leftW + o.placeGap : 0;
+        var rightEdge = available - (rightW > 0 ? rightW + o.placeGap : 0);
         if (centered >= leftEdge && centered + centerW <= rightEdge) {
             centerX = centered;
         } else {

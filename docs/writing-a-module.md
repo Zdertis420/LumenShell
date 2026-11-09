@@ -129,6 +129,8 @@ Users change settings in `~/.config/lumen/config.json`, under your module's id:
 
 `api.settings.values` updates within a second. A bad value (`"size": 99`) produces an error that names the module and key, and only that key falls back to its default. `api.settings.errors` lists such problems so your module can show them. Your module can also change its own settings with `api.settings.set(key, value)` and `api.settings.reset(key)`.
 
+A setting with `"default": null` is *unset* until the user gives it a value (interface 1.2): `api.settings.values.size` is `null`, so write `api.settings.values.size ?? api.style.font.body` to fall back to a design token. See [module-api.md](module-api.md).
+
 ## 7. Reading errors, and reloading
 
 - A module that cannot be loaded (bad manifest, missing file, a QML syntax error, a newer interface than Lumen has) is listed as `failed` with the reason, and nothing else is affected. `lumen modules show <id>` has the details.
@@ -152,7 +154,7 @@ Since module interface 1.1 a module can add an item to another module's extensio
 
    The permission `contribute:<module-id>` is required for every module you contribute to, and it is shown to the user before the module is enabled.
 
-2. **Write the item.** The root is any `Item` with `required property var api` (your own interface object: theme, style, log, settings) and `property var slot` (what the bar tells the item: `edge`, `thickness`, `maxWidth`, `screenName`, `place`). Size it with `implicitWidth` and `slot.thickness`, and take colors and sizes from `api.theme` and `api.style`. The bar creates one instance per bar.
+2. **Write the item.** The root is any `Item` with `required property var api` (your own interface object: theme, style, log, settings) and `property var slot` (what the bar tells the item: `edge`, `vertical`, `thickness`, `maxWidth`, `maxLength`, `font`, `itemPadding`, `itemRadius`, `textRole`, `focusRole`, `screenName`, `place`; see [bar.md](bar.md)). Size it along the bar with `implicitWidth` (or `implicitHeight` when `slot.vertical` is true) and across it with `slot.thickness`, use `slot.font` and `slot.itemPadding` so the item follows the bar's customization, read colors from `api.theme` (the role named by `slot.textRole`), and declare `"api": "1.2"`. An item that ignores the direction is still shown, clipped to the bar's thickness. `examples/hello-bar-item/` adapts to both directions. The bar creates one instance per bar.
 
 3. **Enable the module, then name the item.** Enabling does not place anything. Add its name to one of the bar's lists in the configuration file (`modules.bar.left`, `center` or `right`):
 

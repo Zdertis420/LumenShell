@@ -7,6 +7,9 @@
 #   scripts/tests/smoke.sh --bar-cycles N       N cycles of a bar item (load/unload), of the bar (reload),
 #                                               and of a popup (open/close), comparing memory use
 #   scripts/tests/smoke.sh --cpu-minutes M      average CPU of the idle shell with the bar, over M minutes
+#   scripts/tests/smoke.sh --style-cycles N     N changes of the bar's style and edge in a row, comparing
+#                                               memory use and checking that nothing is left behind (with
+#                                               --cpu-minutes M, also the idle CPU in each of the three styles)
 #
 # Needs a niri session (a Wayland display), Quickshell, and built binaries (make build).
 # It uses a temporary config file, so your own configuration is never touched.
@@ -19,9 +22,14 @@ FIXTURES=$ROOT/scripts/tests/fixtures
 RELOADS=0
 CYCLES=0
 BAR_CYCLES=0
+STYLE_CYCLES=0
 CPU_MINUTES=0
 while [ $# -gt 0 ]; do
 	case "$1" in
+	--style-cycles)
+		STYLE_CYCLES=${2:-100}
+		shift 2
+		;;
 	--reload)
 		RELOADS=${2:-100}
 		shift 2
@@ -253,7 +261,7 @@ if start_shell LUMEN_USER_MODULES_DIR="$UM2"; then
 	wait_log 'probe run state' 4 || true
 	wait_log 'denied done' 4 || true
 	for pattern in \
-		'probe id api-probe apiVersion 1.1' \
+		'probe id api-probe apiVersion 1.2' \
 		'probe theme background #' \
 		'probe style spacing.md 12' \
 		'probe settings.greeting hi' \
@@ -359,7 +367,7 @@ if start_shell LUMEN_USER_MODULES_DIR="$UM5"; then
 
 	check "bad JSON is reported with a dir: id" grep -q 'module:dir:err-bad-json","msg":"invalid: .*JSON' "$TMP/shell.log"
 	check "missing main file is reported with the module id" grep -q 'module:err-missing-main","msg":"invalid: main' "$TMP/shell.log"
-	check "newer interface is reported with both versions" grep -q 'module:err-newer-minor","msg":"invalid: api: requires interface 1.9, Lumen provides 1.1' "$TMP/shell.log"
+	check "newer interface is reported with both versions" grep -q 'module:err-newer-minor","msg":"invalid: api: requires interface 1.9, Lumen provides 1.2' "$TMP/shell.log"
 	check "duplicate id is reported with both directories" bash -c "grep 'invalid: id: duplicate' '$TMP/shell.log' | grep -q 'dup-a' "
 	check "odd directory name is shown as dir:bad_name_" grep -q 'module:dir:bad_name_' "$TMP/shell.log"
 	check "QML syntax error is reported with the module id" grep -q 'module:qml-syntax-error","msg":"failed: ' "$TMP/shell.log"
@@ -469,7 +477,7 @@ mkdir -p "$STUBS"
 printf '#!/bin/sh\necho "$@" >>"%s/notify.log"\n' "$TMP" >"$STUBS/notify-send"
 chmod +x "$STUBS/notify-send"
 rm -f "$TMP/notify.log"
-bar_layers() { niri msg layers 2>/dev/null | grep -c 'Namespace: "quickshell"'; }
+bar_layers() { niri msg layers 2>/dev/null | grep -c 'Namespace: "lumen-bar"$'; }
 bar_outputs() { niri msg outputs 2>/dev/null | grep -c '^Output'; }
 bar_first_output() { niri msg outputs 2>/dev/null | sed -n 's/^Output .*(\(.*\))$/\1/p' | head -1; }
 bar_wait_layers() { # bar_wait_layers N seconds
@@ -625,7 +633,13 @@ if start_shell LUMEN_USER_MODULES_DIR="$UMC"; then
 	check "items beyond the limit of 32 are rejected with the reason" grep -Eq 'item-34/greeting +item-34 +rejected \(bar item limit \(32\) reached\)' <<<"$SHOW"
 	check "the first 32 are shown" grep -Eq 'item-01/greeting +item-01 +shown' <<<"$SHOW"
 	check "the 33rd is rejected too" grep -Eq 'item-33/greeting +item-33 +rejected' <<<"$SHOW"
-	check "items that do not fit the width are dropped and named" grep -q 'Dropped items (screen' <<<"$SHOW"
+	if grep -q 'Dropped items (screen' <<<"$SHOW"; then
+		ok "items that do not fit the width are dropped and named"
+	else
+		bad "items that do not fit the width are dropped and named"
+		echo "$SHOW" | grep -v 'item-[0-9][0-9]/greeting' | tail -15
+		grep -E 'no room for|all items fit' "$TMP/shell.log" | tail -5
+	fi
 	cfg "\"bar\":{\"left\":[],\"center\":[],\"right\":[\"item-01\",\"item-02\"]}$MODS"
 	wait_log 'all items fit again' 6 && ok "dropped items come back when there is room" || bad "dropped items come back when there is room"
 	check "the shell is still responsive" "$LUMEN" version
@@ -728,7 +742,7 @@ mkdir -p "$UMP"
 cp -r "$MODFIX/bar-item-popup" "$UMP/"
 cp -r "$MODFIX/bar-item-popup" "$UMP/bar-item-popup2"
 sed -i 's/"id": "bar-item-popup"/"id": "bar-item-popup2"/' "$UMP/bar-item-popup2/module.json"
-overlay_surfaces() { niri msg layers 2>/dev/null | awk '/Overlay layer:/{o=1;next} /(Background|Bottom|Top) layer:/{o=0} /^Output/{o=0} o&&/Namespace: "quickshell"/{n++} END{print n+0}'; }
+overlay_surfaces() { niri msg layers 2>/dev/null | awk '/Overlay layer:/{o=1;next} /(Background|Bottom|Top) layer:/{o=0} /^Output/{o=0} o&&/Namespace: "lumen-bar-popup"/{n++} END{print n+0}'; }
 printf '{"log":{"level":"debug"},"modules":{"bar-item-popup":{"enabled":true},"bar-item-popup2":{"enabled":true},"bar":{"left":["bar-item-popup","bar-item-popup2"]}}}\n' >"$LUMEN_CONFIG_FILE"
 if start_shell LUMEN_USER_MODULES_DIR="$UMP"; then
 	wait_log 'popup fixture created' 6 || true
@@ -770,6 +784,280 @@ if start_shell LUMEN_USER_MODULES_DIR="$UMP"; then
 	fi
 else
 	bad "shell did not start for the popup checks"
+	cat "$TMP/shell.log"
+fi
+stop_shell
+
+# ---- 16. Bar styles, edges, settings, keyboard (specs/004-bar-customization-styles, quickstart steps 3 to 7) ----
+echo "16. bar styles and edges"
+UMS="$TMP/user-modules-styles"
+rm -rf "$UMS"
+mkdir -p "$UMS"
+cp -r "$MODFIX/bar-item-popup" "$UMS/"
+barcfg() { # barcfg '"style":"islands","edge":"left"' ['"other-module":{...}']: a config with debug logging
+	printf '{"log":{"level":"debug"},"modules":{"bar":{%s}%s}}\n' "$1" "${2:+,$2}" >"$LUMEN_CONFIG_FILE"
+}
+bar_surfaces() { # the names of the bar's surfaces on one output, sorted, on one line
+	niri msg layers 2>/dev/null | awk -v out="$1" '/^Output /{cur=index($0, "\"" out "\"")>0} cur&&/Namespace: "lumen-bar/{s=$0; sub(/.*Namespace: "/,"",s); sub(/"$/,"",s); print s}' | LC_ALL=C sort | tr '\n' ' '
+}
+bar_keyboard_taken() { # how many of the bar's surfaces on one output report keyboard interactivity other than none
+	niri msg layers 2>/dev/null | awk -v out="$1" '/^Output /{cur=index($0, "\"" out "\"")>0} cur&&/Namespace: "lumen-bar/{want=1;next} want&&/Keyboard interactivity/{if ($0 !~ /none/) n++; want=0} END{print n+0}'
+}
+expect_surfaces() { # expect_surfaces style edge border radius: the surfaces the bar should have
+	local style=$1 edge=$2 border=$3 radius=$4 want="lumen-bar " s
+	if [ "$style" = frame ]; then
+		for s in bottom left right top; do
+			if [ "$s" != "$edge" ] && [ "$border" -gt 0 ]; then want+="lumen-bar-border-$s "; fi
+		done
+		# The corner blocks have a size when a border or the radius is above 0 (also for a radius of 0,
+		# so the frame is unbroken at the screen corners); with both at 0 there is no corner to fill.
+		if [ "$border" -gt 0 ] || [ "$radius" -gt 0 ]; then want+="lumen-bar-corner-bl lumen-bar-corner-br lumen-bar-corner-tl lumen-bar-corner-tr "; fi
+	fi
+	echo "$want"
+}
+wait_surfaces() { # wait_surfaces output "expected" seconds
+	local i
+	for i in $(seq 1 $(($3 * 10))); do
+		if [ "$(bar_surfaces "$1")" = "$2" ]; then return 0; fi
+		sleep 0.1
+	done
+	return 1
+}
+look_line() { grep "look on $1: " "$TMP/shell.log" | tail -1; } # the bar's last resolved look for an output
+barcfg ''
+if start_shell LUMEN_USER_MODULES_DIR="$UMS"; then
+	wait_log 'module:bar","msg":"bar loaded' 5 || true
+	OUTPUTS=$(bar_outputs)
+	O1=$(bar_first_output)
+	wait_surfaces "$O1" "lumen-bar " 5 || true
+	wait_log 'created item bar-clock/clock' 5 || true
+	BASELINE=$(look_line "$O1")
+
+	# The three styles on the four edges (quickstart steps 3 and 4), and the keyboard before any command.
+	for style in solid islands frame; do
+		for edge in top bottom left right; do
+			barcfg "\"style\":\"$style\",\"edge\":\"$edge\""
+			want=$(expect_surfaces "$style" "$edge" 8 16)
+			if wait_surfaces "$O1" "$want" 6; then ok "$style on the $edge edge: the surfaces are right"; else bad "$style on the $edge edge: surfaces (got: $(bar_surfaces "$O1"), want: $want)"; fi
+			[ "$(bar_keyboard_taken "$O1")" -eq 0 ] && ok "$style on the $edge edge: no bar surface takes the keyboard" || bad "$style on the $edge edge: a bar surface takes the keyboard"
+		done
+	done
+	# Items are created once per output and never recreated by a style or edge change (FR-005).
+	CLOCKS=$(count_log 'created item bar-clock/clock')
+	[ "$CLOCKS" -eq "$OUTPUTS" ] && ok "12 style and edge changes created each item once per output ($CLOCKS)" || bad "items were created $CLOCKS times, want $OUTPUTS"
+	[ "$(count_log 'removed item bar-clock/clock')" -eq 0 ] && ok "no item was removed by a style or edge change" || bad "an item was removed by a style or edge change"
+
+	# A bad style or edge falls back for that key only, and names the key.
+	barcfg '"style":"pills","edge":"middle"'
+	if wait_surfaces "$O1" "lumen-bar " 6; then ok "an unknown style falls back to solid"; else bad "an unknown style falls back to solid"; fi
+	sleep 0.5
+	check "the unknown style is reported with its key" grep -q 'modules.bar.style' "$TMP/shell.log"
+	check "the unknown edge is reported with its key" grep -q 'modules.bar.edge' "$TMP/shell.log"
+
+	# A frame border of zero removes the border surfaces and keeps the corners; the style back to solid leaves nothing behind.
+	barcfg '"style":"frame","frameBorder":0'
+	want=$(expect_surfaces frame top 0 16)
+	if wait_surfaces "$O1" "$want" 6; then ok "a frame border of 0 removes only the border surfaces"; else bad "a frame border of 0 (got: $(bar_surfaces "$O1"), want: $want)"; fi
+	barcfg '"style":"solid"'
+	if wait_surfaces "$O1" "lumen-bar " 6; then ok "back to solid leaves no frame surface behind"; else bad "back to solid leaves no frame surface behind"; fi
+
+	# A frame radius of 0 still has the corner blocks, so the frame is unbroken at the screen corners (research R4a).
+	for edge in top bottom left right; do
+		barcfg "\"style\":\"frame\",\"edge\":\"$edge\",\"frameRadius\":0"
+		want=$(expect_surfaces frame "$edge" 8 0)
+		if wait_surfaces "$O1" "$want" 6; then ok "frame on the $edge edge with a radius of 0 keeps its corner blocks"; else bad "frame on the $edge edge with a radius of 0 (got: $(bar_surfaces "$O1"), want: $want)"; fi
+	done
+	# The border panels set no margins: the compositor already offsets them by the strip's space, and
+	# a margin would count twice and leave a gap next to the corner block (research R4b). Layer geometry
+	# is not readable from `niri msg layers`, so this guards the source.
+	if ! grep -Eq '^[[:space:]]*margins[[:space:]]*\{' "$ROOT/modules/bar/FrameBorders.qml"; then ok "the frame's border panels set no margins"; else bad "the frame's border panels set margins (research R4b)"; fi
+	# With no border and no radius there is no corner to fill: the strip alone.
+	barcfg '"style":"frame","frameBorder":0,"frameRadius":0'
+	if wait_surfaces "$O1" "lumen-bar " 6; then ok "a frame with no border and no radius is the strip alone"; else bad "a frame with no border and no radius (got: $(bar_surfaces "$O1"))"; fi
+	barcfg '"style":"solid"'
+	wait_surfaces "$O1" "lumen-bar " 6 || true
+
+	# Islands with every place empty: no surface and no space (spec Clarifications).
+	barcfg '"style":"islands","left":[],"center":[],"right":[]'
+	if wait_surfaces "$O1" "" 6; then ok "islands with nothing to show map no surface"; else bad "islands with nothing to show map no surface (got: $(bar_surfaces "$O1"))"; fi
+	barcfg '"style":"islands"'
+	if wait_surfaces "$O1" "lumen-bar " 6; then ok "the island comes back when items are shown again"; else bad "the island comes back when items are shown again"; fi
+	# (Emptying the lists destroys the items, so they are created again here: once more per output.)
+	CLOCKS=$(count_log 'created item bar-clock/clock')
+	[ "$CLOCKS" -eq $((OUTPUTS * 2)) ] && ok "the items came back once per output" || bad "the items were created $CLOCKS times in all, want $((OUTPUTS * 2))"
+
+	# Two changes in quick succession: the last one wins.
+	barcfg '"style":"islands","edge":"left"'
+	barcfg '"style":"frame","edge":"bottom"'
+	want=$(expect_surfaces frame bottom 8 16)
+	if wait_surfaces "$O1" "$want" 6; then ok "two quick changes end with the last one"; else bad "two quick changes (got: $(bar_surfaces "$O1"), want: $want)"; fi
+	[ "$(count_log 'created item bar-clock/clock')" -eq "$CLOCKS" ] && ok "quick changes did not recreate any item" || bad "quick changes recreated an item"
+
+	# Theme changes reach the strip, the borders and the corners (SC-005).
+	"$LUMEN" theme tokyo-night --temp >/dev/null 2>&1
+	wait_log 'bar corner tl follows theme tokyo-night' 5 || true
+	check "the strip follows a theme change in the frame style" grep -q 'bar strip follows theme tokyo-night' "$TMP/shell.log"
+	check "the borders follow it" grep -q 'bar border left follows theme tokyo-night' "$TMP/shell.log"
+	check "the corners follow it" grep -q 'bar corner tl follows theme tokyo-night' "$TMP/shell.log"
+
+	# Settings apply live and a deleted key returns to its default (quickstart step 5, SC-003, SC-012).
+	barcfg ''
+	wait_surfaces "$O1" "lumen-bar " 5 || true
+	sleep 1
+	while IFS='|' read -r key value expect; do
+		barcfg "\"style\":\"frame\",\"$key\":$value"
+		if wait_log "look on $O1: .*$expect" 4; then ok "$key $value applies live"; else bad "$key $value did not show in the bar's look"; fi
+	done <<'SETTINGS'
+thickness|50|thickness=50\b
+margin|6|margin=6\b
+padding|3|padding=3\b
+itemGap|2|itemGap=2\b
+placeGap|20|placeGap=20\b
+itemPadding|5|itemPadding=5\b
+itemRadius|9|itemRadius=9\b
+radius|14|radius=14\b
+frameRadius|20|frameRadius=20\b
+frameBorder|10|frameBorder=10\b
+popupRadius|7|popupRadius=7\b
+popupPadding|7|popupPadding=7\b
+popupBorderWidth|3|popupBorderWidth=3\b
+fontSize|15|fontSize=15\b
+fontWeight|"bold"|fontWeight=700\b
+fontItalic|true|fontItalic=true
+fontFamily|"monospace"|fontFamily=monospace\b
+textRole|"error"|roles=error,
+focusRole|"tertiary"|,tertiary\b
+frameOpacity|0|colors=#[0-9a-f]*,#[0-9a-f]*,#00
+SETTINGS
+	barcfg '"style":"solid","backgroundOpacity":0'
+	wait_log "look on $O1: .*colors=#00" 4 && ok "backgroundOpacity 0 makes the strip transparent" || bad "backgroundOpacity 0 makes the strip transparent"
+	barcfg '"style":"islands","islandOpacity":0'
+	wait_log "look on $O1: .*colors=#[0-9a-f]*,#00" 4 && ok "islandOpacity 0 makes the islands transparent" || bad "islandOpacity 0 makes the islands transparent"
+	barcfg '"backgroundRole":"primary","islandRole":"error","frameRole":"tertiary","popupBackground":"secondary","popupBorder":"primary"'
+	sleep 1.5
+	LOOK=$(look_line "$O1")
+	[ -n "$LOOK" ] && [ "$LOOK" != "$BASELINE" ] && ok "role settings change the resolved colors" || bad "role settings change the resolved colors"
+	barcfg ''
+	sleep 1.5
+	# (Colors are left out: an earlier step changed the theme of this shell.)
+	NOW_LOOK=$(look_line "$O1" | sed 's/^.*look on//; s/colors=[^ ]* //')
+	WAS_LOOK=$(echo "$BASELINE" | sed 's/^.*look on//; s/colors=[^ ]* //')
+	if [ "$NOW_LOOK" = "$WAS_LOOK" ]; then ok "deleting every key returns the bar to its default look"; else
+		bad "deleting every key returns the default look"
+		echo "  was: $WAS_LOOK"
+		echo "  now: $NOW_LOOK"
+	fi
+	check "the config file holds only the keys written" bash -c "! grep -q 'frameBorder\|islandRole' '$LUMEN_CONFIG_FILE'"
+
+	# Bad values fall back for that key only and name it (quickstart step 6).
+	barcfg '"thickness":-4,"margin":5000,"fontSize":"big","backgroundRole":"sparkles","islandOpacity":3,"frameBorder":900,"fontFamily":"No Such Font"'
+	sleep 2
+	SHOW=$("$LUMEN" modules show bar 2>&1)
+	for key in thickness margin fontSize backgroundRole islandOpacity frameBorder; do
+		check "a bad $key is reported with its key" grep -Eq "^  $key: must be " <<<"$SHOW"
+	done
+	check "a font that is not installed is reported with one warning" grep -Eq 'fontFamily: "No Such Font" is not installed' <<<"$SHOW"
+	"$LUMEN" version >/dev/null 2>&1 && ok "the bar and the shell keep running with bad values" || bad "the shell keeps running with bad values"
+
+	# A popup closes when the edge or the style changes (spec edge cases).
+	POPUPMOD='"bar-item-popup":{"enabled":true}'
+	barcfg '"left":["bar-item-popup"]' "$POPUPMOD"
+	wait_log 'created item bar-item-popup/x' 6 || true
+	OUT=$("$LUMEN" modules call bar-item-popup open 2>&1)
+	CLOSED=$(count_log 'popup closed for bar-item-popup/x')
+	barcfg '"left":["bar-item-popup"],"edge":"bottom"' "$POPUPMOD"
+	sleep 1.5
+	[ "$OUT" = "true" ] && [ "$(count_log 'popup closed for bar-item-popup/x')" -gt "$CLOSED" ] && ok "changing the edge closes an open popup" || bad "changing the edge closes an open popup (open: $OUT)"
+	"$LUMEN" modules call bar-item-popup open >/dev/null 2>&1
+	CLOSED=$(count_log 'popup closed for bar-item-popup/x')
+	barcfg '"left":["bar-item-popup"],"edge":"bottom","style":"islands"' "$POPUPMOD"
+	sleep 1.5
+	[ "$(count_log 'popup closed for bar-item-popup/x')" -gt "$CLOSED" ] && ok "changing the style closes an open popup" || bad "changing the style closes an open popup"
+
+	# Principle VIII: the popup holds the keyboard only while open; the bar only after its focus command.
+	"$LUMEN" modules call bar-item-popup open >/dev/null 2>&1
+	sleep 1
+	POPUP_KB=$(niri msg layers 2>/dev/null | awk '/Namespace: "lumen-bar-popup"/{want=1;next} want&&/Keyboard interactivity/{print $0; want=0}' | head -1)
+	[[ "$POPUP_KB" != *none* ]] && [ -n "$POPUP_KB" ] && ok "an open popup holds the keyboard" || bad "an open popup holds the keyboard (got: $POPUP_KB)"
+	"$LUMEN" modules call bar-item-popup close >/dev/null 2>&1
+	sleep 1
+	POPUP_SURF=$(niri msg layers 2>/dev/null | grep -c 'Namespace: "lumen-bar-popup"')
+	[ "$POPUP_SURF" -eq 0 ] && ok "a closed popup leaves no surface and no keyboard focus" || bad "a closed popup leaves a surface"
+	barcfg '"left":["bar-item-popup"]' "$POPUPMOD"
+	sleep 1.5
+	[ "$(bar_keyboard_taken "$O1")" -eq 0 ] && ok "before the focus command no bar surface takes the keyboard" || bad "a bar surface takes the keyboard before the focus command"
+	OUT=$("$LUMEN" modules call bar focus 2>&1)
+	if [[ "$OUT" == focus\ on\ * ]]; then
+		sleep 0.5
+		[ "$(niri msg layers 2>/dev/null | grep -A1 'Namespace: "lumen-bar"$' | grep -c 'Keyboard interactivity' )" -ge 1 ] && ok "the focus command is what gives the bar the keyboard ($OUT)" || bad "the focus command did not reach the bar"
+	else
+		ok "the focus command found no interactive item here ($OUT)"
+	fi
+	ERRS=$(grep -E 'TypeError|ReferenceError|Unable to assign|Binding loop' "$TMP/shell.log" | head -3 | cut -c1-300)
+	if [ -z "$ERRS" ]; then ok "no QML errors or binding loops"; else
+		bad "no QML errors or binding loops"
+		echo "$ERRS"
+	fi
+else
+	bad "shell did not start for the style checks"
+	cat "$TMP/shell.log"
+fi
+stop_shell
+
+# ---- 17. Items follow the bar (specs/004-bar-customization-styles, quickstart step 7) ----
+echo "17. items follow the bar"
+UMI="$TMP/user-modules-items"
+rm -rf "$UMI"
+mkdir -p "$UMI"
+cp -r "$MODFIX/bar-item-uses-slot-1-2" "$MODFIX/bar-item-ignores-direction" "$ROOT/examples/hello-bar-item" "$UMI/"
+ITEMS='"bar-item-uses-slot-1-2":{"enabled":true},"bar-item-ignores-direction":{"enabled":true},"hello-bar-item":{"enabled":true}'
+LISTS='"left":["bar-item-uses-slot-1-2","bar-item-ignores-direction","hello-bar-item"]'
+barcfg "$LISTS" "$ITEMS"
+if start_shell LUMEN_USER_MODULES_DIR="$UMI"; then
+	wait_log 'created item bar-item-uses-slot-1-2/facts' 6 || true
+	sleep 1
+	facts() { "$LUMEN" modules call bar-item-uses-slot-1-2 facts 2>&1; }
+	FACTS=$(facts)
+	[[ "$FACTS" == *"vertical=false edge=top thickness=37"* ]] && ok "an item of interface 1.2 reads the slot facts of a horizontal bar" || bad "slot facts of a horizontal bar (got: $FACTS)"
+	barcfg "$LISTS,\"edge\":\"left\"" "$ITEMS"
+	sleep 1.5
+	FACTS=$(facts)
+	[[ "$FACTS" == *"vertical=true edge=left thickness=37"* && "$FACTS" == *"maxWidth=37"* ]] && ok "the facts follow the edge; maxWidth is the thickness on a vertical bar" || bad "slot facts of a vertical bar (got: $FACTS)"
+	SHOW=$("$LUMEN" modules show bar 2>&1)
+	check "an item written for a horizontal bar is still shown on a vertical one" grep -Eq 'bar-item-ignores-direction/wide +bar-item-ignores-direction +shown' <<<"$SHOW"
+	check "the other items are still shown next to it" grep -Eq 'hello-bar-item/greeting +hello-bar-item +shown' <<<"$SHOW"
+	check "the clock is still shown" grep -Eq 'bar-clock/clock +bar-clock +shown' <<<"$SHOW"
+
+	# The bar's font, padding and roles reach every item, built in or not.
+	barcfg "$LISTS,\"fontSize\":15,\"itemPadding\":5,\"itemRadius\":9,\"textRole\":\"error\",\"focusRole\":\"tertiary\"" "$ITEMS"
+	sleep 1.5
+	FACTS=$(facts)
+	[[ "$FACTS" == *"fontSize=15"* && "$FACTS" == *"itemPadding=5"* && "$FACTS" == *"itemRadius=9"* && "$FACTS" == *"textRole=error"* && "$FACTS" == *"focusRole=tertiary"* ]] && ok "an item of interface 1.2 follows the bar's font, padding, radius and roles" || bad "the facts follow the bar's settings (got: $FACTS)"
+	for id in bar-clock bar-sound bar-battery; do
+		if wait_log "module:$id\",\"msg\":\"look .*size=15 .*padding=5 radius=9 role=error" 4; then ok "$id follows the bar's font, padding, radius and text role"; else bad "$id follows the bar's settings"; fi
+	done
+
+	# An item's own setting wins, and changes only that item.
+	SOUND_LOOKS=$(count_log 'module:bar-sound","msg":"look')
+	barcfg "$LISTS,\"fontSize\":15" "$ITEMS,\"bar-clock\":{\"fontSize\":20,\"fontWeight\":\"bold\"}"
+	if wait_log 'module:bar-clock","msg":"look .*size=20 weight=700' 4; then ok "the clock's own font size and weight win over the bar's"; else bad "the clock's own settings win"; fi
+	[ "$(count_log 'module:bar-sound","msg":"look')" -eq "$SOUND_LOOKS" ] || SOUND_LOOKS=$(count_log 'module:bar-sound","msg":"look')
+	check "the sound item still has the bar's size" bash -c "grep 'module:bar-sound\",\"msg\":\"look' '$TMP/shell.log' | tail -1 | grep -q 'size=15'"
+
+	# A bad own setting falls back for that key only.
+	barcfg "$LISTS" "$ITEMS,\"bar-clock\":{\"fontSize\":0,\"backgroundRole\":\"sparkles\"}"
+	sleep 1.5
+	SHOW=$("$LUMEN" modules show bar-clock 2>&1)
+	check "a bad item font size is reported with its key" grep -Eq '^  fontSize: must be ' <<<"$SHOW"
+	check "a bad item background role is reported with its key" grep -Eq '^  backgroundRole: must be ' <<<"$SHOW"
+	"$LUMEN" version >/dev/null 2>&1 && ok "the shell keeps running with bad item settings" || bad "the shell keeps running with bad item settings"
+	ERRS=$(grep -E 'TypeError|ReferenceError|Unable to assign|Binding loop' "$TMP/shell.log" | head -3 | cut -c1-300)
+	if [ -z "$ERRS" ]; then ok "no QML errors or binding loops"; else
+		bad "no QML errors or binding loops"
+		echo "$ERRS"
+	fi
+else
+	bad "shell did not start for the item checks"
 	cat "$TMP/shell.log"
 fi
 stop_shell
@@ -866,6 +1154,64 @@ if [ "$BAR_CYCLES" -gt 0 ]; then
 		[ "$last" -le "$limit" ] && ok "memory within 10% over popup open and close cycles" || bad "memory grew more than 10% over the popup cycles"
 	else
 		bad "shell did not start for the bar cycle checks"
+	fi
+	stop_shell
+fi
+
+if [ "$STYLE_CYCLES" -gt 0 ]; then
+	echo "15c. $STYLE_CYCLES style and edge changes"
+	UMY="$TMP/user-modules-style-cycles"
+	rm -rf "$UMY"
+	mkdir -p "$UMY"
+	barcfg ''
+	if start_shell LUMEN_USER_MODULES_DIR="$UMY"; then
+		sleep 2
+		OUTPUTS=$(bar_outputs)
+		O1=$(bar_first_output)
+		wait_surfaces "$O1" "lumen-bar " 5 || true
+		styles=(solid islands frame)
+		edges=(top bottom left right)
+		first=""
+		# A first pass through all 12 combinations warms up: the toolkit keeps what it allocated for
+		# the first window of each kind (the frame's surfaces cost about 150 MB on three outputs),
+		# so the baseline is taken after it, and the N changes that follow must not add to it.
+		warmup=12
+		for i in $(seq 0 $((warmup + STYLE_CYCLES - 1))); do
+			barcfg "\"style\":\"${styles[$((i % 3))]}\",\"edge\":\"${edges[$((i % 4))]}\""
+			sleep 0.4
+			if [ "$i" -eq $((warmup - 1)) ]; then
+				sleep 1
+				first=$(rss_of)
+			fi
+		done
+		barcfg ''
+		wait_surfaces "$O1" "lumen-bar " 6 && ok "after the changes only the bar's own surface is left" || bad "surfaces left behind after the changes (got: $(bar_surfaces "$O1"))"
+		sleep 1
+		last=$(rss_of)
+		limit=$((first + first * 12 / 100))
+		echo "  style and edge changes: rss after the first ${first} kB, after $STYLE_CYCLES: ${last} kB (limit ${limit} kB)"
+		[ "$last" -le "$limit" ] && ok "memory within 12% over $STYLE_CYCLES style and edge changes" || bad "memory grew more than 12% over the style and edge changes"
+		made=$(count_log 'created item bar-clock/clock')
+		[ "$made" -eq "$OUTPUTS" ] && ok "no item was created again by the changes ($made)" || bad "items were created $made times, want $OUTPUTS"
+		check "no item was removed by the changes" bash -c "! grep -q 'removed item bar-clock/clock' '$TMP/shell.log'"
+		check "no QML errors or binding loops" bash -c "! grep -E 'TypeError|ReferenceError|Unable to assign|Binding loop' '$TMP/shell.log'"
+		# Idle CPU in each style, over the same window as the check below.
+		if [ "$CPU_MINUTES" -gt 0 ]; then
+			ticks() { awk '{print $14 + $15}' "/proc/$SHELL_PID/stat"; }
+			hz=$(getconf CLK_TCK)
+			for style in solid islands frame; do
+				barcfg "\"style\":\"$style\""
+				sleep 3
+				t0=$(ticks)
+				sleep $((CPU_MINUTES * 60))
+				t1=$(ticks)
+				hundredths=$(((t1 - t0) * 10000 / hz / (CPU_MINUTES * 60)))
+				echo "  $style: average CPU $((hundredths / 100)).$(printf '%02d' $((hundredths % 100)))% of one core over $CPU_MINUTES minute(s)"
+				[ "$hundredths" -lt 100 ] && ok "idle CPU in the $style style is under 1%" || bad "idle CPU in the $style style is 1% or more"
+			done
+		fi
+	else
+		bad "shell did not start for the style cycle checks"
 	fi
 	stop_shell
 fi

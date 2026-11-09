@@ -136,5 +136,115 @@ TestCase {
         compare(fit([100], [], [100], 1000, 10).centerX, 0);
     }
 
+    // ---- specs/004-bar-customization-styles: two gaps, place padding, any axis ----
+    function fitOpts(left, center, right, available, opts) {
+        return Layout.fit({
+            "left": left,
+            "center": center,
+            "right": right
+        }, available, opts);
+    }
+
+    function test_aNumberMeansOneGapForItemsAndPlaces() {
+        var a = fit([100, 100], [100], [100], 500, 10);
+        var b = fitOpts([100, 100], [100], [100], 500, {
+            "itemGap": 10,
+            "placeGap": 10,
+            "placePadding": 0
+        });
+        compare(a.left, b.left);
+        compare(a.center, b.center);
+        compare(a.right, b.right);
+        compare(a.centerX, b.centerX);
+        compare(names(a.dropped), names(b.dropped));
+    }
+
+    function test_itemGapAndPlaceGapAreCountedSeparately() {
+        // left: 100 + 100 + item gap 4 = 204; right: 100; one place gap of 20 between them.
+        var opts = {
+            "itemGap": 4,
+            "placeGap": 20,
+            "placePadding": 0
+        };
+        compare(Layout.totalWidth({
+            "left": [100, 100],
+            "center": [],
+            "right": [100]
+        }, {
+            "left": 2,
+            "center": 0,
+            "right": 1
+        }, opts), 324);
+        // 323 does not fit, so the last item of the right place goes.
+        var r = fitOpts([100, 100], [], [100], 323, opts);
+        compare(names(r.dropped), "right:0");
+        r = fitOpts([100, 100], [], [100], 324, opts);
+        compare(r.dropped.length, 0);
+    }
+
+    function test_placePaddingIsAddedToEachNonEmptyPlace() {
+        var opts = {
+            "itemGap": 0,
+            "placeGap": 10,
+            "placePadding": 5
+        };
+        // Two places of one 100 item: (100 + 10) * 2 + gap 10 = 230. An empty place adds nothing.
+        compare(Layout.totalWidth({
+            "left": [100],
+            "center": [],
+            "right": [100]
+        }, {
+            "left": 1,
+            "center": 0,
+            "right": 1
+        }, opts), 230);
+        compare(Layout.widthOf({
+            "left": [100],
+            "center": [],
+            "right": []
+        }, {
+            "left": 1,
+            "center": 0,
+            "right": 0
+        }, "center", opts), 0);
+    }
+
+    function test_placePaddingAffectsWhatFits() {
+        var opts = {
+            "itemGap": 0,
+            "placeGap": 10,
+            "placePadding": 5
+        };
+        var r = fitOpts([100], [], [100], 229, opts);
+        compare(names(r.dropped), "right:0");
+        r = fitOpts([100], [], [100], 230, opts);
+        compare(r.dropped.length, 0);
+    }
+
+    function test_theSameRuleWorksOnALengthTakenFromAHeight() {
+        // A vertical bar on a 1080 px tall screen: item lengths are heights.
+        var r = fitOpts([40, 40], [60], [40, 40, 40], 1080, {
+            "itemGap": 8,
+            "placeGap": 8,
+            "placePadding": 0
+        });
+        compare(r.dropped.length, 0);
+        r = fitOpts([300, 300], [300], [300, 300], 1080, {
+            "itemGap": 8,
+            "placeGap": 8,
+            "placePadding": 0
+        });
+        compare(names(r.dropped), "right:1,right:0");
+    }
+
+    function test_centerUsesThePlaceGapNextToTheOtherPlaces() {
+        var r = fitOpts([400], [100], [], 1000, {
+            "itemGap": 0,
+            "placeGap": 30,
+            "placePadding": 0
+        });
+        verify(r.centerX >= 430, "after the left place and its place gap: " + r.centerX);
+    }
+
     name: "BarLayout"
 }

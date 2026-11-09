@@ -29,6 +29,8 @@ make qmltest   # only the QML unit tests (scripts/tests/bar_*_test.qml, run by t
 make smoke     # scripts/tests/smoke.sh (needs a niri session)
 ```
 
+`scripts/tests/smoke.sh` also takes options for the long resource checks: `--reload N`, `--modules-cycles N`, `--bar-cycles N` (a contributor, the bar and a popup, N times each), `--style-cycles N` (N changes of the bar's style and edge, after a warm-up pass through all 12 combinations) and `--cpu-minutes M` (idle CPU over M minutes; with `--style-cycles`, once in each style). The smoke test reads the compositor's layer list with `niri msg layers`; the bar's surfaces are named `lumen-bar`, `lumen-bar-border-<side>`, `lumen-bar-corner-<corner>` and `lumen-bar-popup`.
+
 Tests are black-box: they run the built programs and check stdout, stderr, and exit codes.
 
 ## QML rules

@@ -1,4 +1,4 @@
-# Module interface reference (version 1.1)
+# Module interface reference (version 1.2)
 
 Everything a module is meant to use. The bundled modules use exactly this and nothing more; a test checks it (`scripts/tests/module_api_usage_test.go`). The formal contract is `specs/002-modules/contracts/module-api.md`; the manifest is described in `specs/002-modules/contracts/module-manifest.md`. For a walkthrough, read [writing-a-module.md](writing-a-module.md).
 
@@ -26,9 +26,9 @@ When the module is unloaded (disabled, reloaded, or on shutdown), this object an
 | Member | Needs permission | Description |
 |--------|------------------|-------------|
 | `api.id`, `api.name`, `api.version` | none | From the manifest |
-| `api.apiVersion` | none | The interface version Lumen provides, `"1.1"` |
+| `api.apiVersion` | none | The interface version Lumen provides, `"1.2"` |
 | `api.theme` | none | The 16 color roles (`primary`, `onPrimary`, `surface`, ...), plus `mode`, `paletteId`, `status`, `reason`. Colors follow theme changes live; bind to them, never copy hex values |
-| `api.style` | none | Design tokens: `spacing`, `radius`, `font`, `motion` |
+| `api.style` | none | Design tokens: `spacing`, `radius`, `font`, `motion`, `border` (`api.style.border.thin` is the hairline of outlines and focus rings) |
 | `api.log` | none | `debug(msg, fields)`, `info`, `warn`, `error`. Entries carry the source `module:<id>` |
 | `api.settings.values` | none | This module's resolved settings, defaults filled in. Reactive |
 | `api.settings.errors` | none | Problems with this module's settings: `[{key, problem, fallback}]`. Reactive |
@@ -86,6 +86,16 @@ Declared in the manifest under `settings`: a key and a rule `{type, default, enu
 echo '{"bundledDir":"modules","userDir":"","apiVersion":"1.0","dataDir":"data"}' | scripts/bin/modules schema
 ```
 
+### Unset settings (interface 1.2)
+
+A setting can give `"default": null` (for `string`, `integer`, `number` and `boolean` settings, not for `stringlist`). It means *unset*: until the user sets the key, `api.settings.values.<key>` is `null`, the merged schema has no default for it, and `lumen modules show` prints `(unset)`. Use it where the value should come from a design token (for example `api.style.spacing.sm`) so that changes to the token reach your module. Document what unset means for each such key. A user value must still match the rule, `null` is not accepted from the user's file (delete the key instead), and resetting returns the key to unset.
+
+```json
+"fontSize": {"type": "integer", "default": null, "min": 1, "max": 96, "description": "Text size; unset follows the bar"}
+```
+
+In QML, read it with `??`: `api.settings.values.fontSize ?? slot.font.pixelSize`.
+
 ## Interface 1.1: extension points, contributions and commands
 
 Version 1.1 adds ways for modules to work together. Everything is optional, so a 1.0 module loads unchanged. The formal contract is `specs/003-bar/contracts/module-api-1.1.md` and `module-manifest-1.1.md`.
@@ -133,5 +143,7 @@ The interface version is `major.minor`. A module loads if its `api` major number
 What changed:
 What to do:
 ```
+
+No migrations: version 1.2 only added things (the unset default `"default": null`, and new members of the bar's slot: `vertical`, `maxLength`, `font`, `itemPadding`, `itemRadius`, `textRole` and `focusRole`, documented in [bar.md](bar.md)), so it is additive and no module needs to change. A module that reads one of them declares `"api": "1.2"`; a 1.1 shell refuses it with the required and available versions.
 
 No migrations: version 1.1 only added things (extension points, contributions, commands, the `stringlist` setting type, string length limits, and the `contribute:<module-id>` permission), so no module needs to change. A module that needs a 1.1 member declares `"api": "1.1"`; a 1.0 shell refuses it with the required and available versions. `requires` is still reserved. It is accepted and ignored, with a warning.

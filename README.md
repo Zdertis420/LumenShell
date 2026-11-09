@@ -44,8 +44,14 @@ scripts/bin/lumen modules call bar focus  # run a module command, here: put keyb
 
 The bar has three places (left, center, right) on every screen you choose, and shows the items that you list in the configuration file, like waybar. Items come from modules: the clock, the sound level and the battery are bundled, and any module can add its own. See [docs/bar.md](docs/bar.md) for the settings, the keyboard use, and how to write an item.
 
+The bar can sit on any of the four edges and has three styles: `solid` (one strip, the default), `islands` (three separate rounded shapes) and `frame` (a border around the whole screen with rounded inner corners). Colors (theme roles with opacity), fonts, sizes, corner radii and spacing are settings too, so you can change anything without touching the code.
+
 ```json
 {"modules": {"bar": {"edge": "bottom", "left": ["hello-bar-item"], "center": ["bar-clock"], "right": ["bar-sound", "bar-battery"]}}}
+```
+
+```json
+{"modules": {"bar": {"style": "islands", "margin": 8, "radius": 14, "fontSize": 14, "islandRole": "surfaceVariant", "islandOpacity": 0.9}}}
 ```
 
 A broken module only breaks itself: it is listed as `failed` with the reason. Modules run inside the shell with its privileges; permissions are shown, not a sandbox. To write one, follow [docs/writing-a-module.md](docs/writing-a-module.md) and copy `examples/hello-module/`. The interface is described in [docs/module-api.md](docs/module-api.md).

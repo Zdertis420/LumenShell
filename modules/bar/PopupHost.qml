@@ -12,6 +12,12 @@ PanelWindow {
 
     required property var api
     required property string edge
+    // The bar's resolved look and sizes (Main.qml and geometry.js): the popup's colors, corner
+    // radius, padding and border come from the bar's popup settings.
+    required property var look
+    required property var sizes
+    readonly property int padding: host.sizes.popupPadding
+    readonly property int twice: 2 // documented constant: padding is on both sides of the content
     // Where the opening item is, in screen coordinates: {x, y, width, height}.
     property var anchorRect: ({
         "x": 0,
@@ -36,9 +42,11 @@ PanelWindow {
             return false;
         }
         host.content = made;
+        // The wished size is the content's, plus the padding on both sides.
+        const inset = host.padding * host.twice;
         const wish = {
-            "width": size.width > 0 ? size.width : made.implicitWidth,
-            "height": size.height > 0 ? size.height : made.implicitHeight
+            "width": (size.width > 0 ? size.width : made.implicitWidth) + inset,
+            "height": (size.height > 0 ? size.height : made.implicitHeight) + inset
         };
         const r = Popup.place(host.anchorRect, wish, {
             "x": 0,
@@ -50,8 +58,10 @@ PanelWindow {
         frame.y = r.y;
         frame.width = r.width;
         frame.height = r.height;
-        made.width = r.width;
-        made.height = r.height;
+        made.x = host.padding;
+        made.y = host.padding;
+        made.width = Math.max(0, r.width - inset);
+        made.height = Math.max(0, r.height - inset);
         host.open = true;
         keys.forceActiveFocus();
         return true;
@@ -69,6 +79,7 @@ PanelWindow {
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.namespace: "lumen-bar-popup"
     WlrLayershell.keyboardFocus: open ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     Component.onDestruction: close()
 
@@ -96,10 +107,10 @@ PanelWindow {
     Rectangle {
         id: frame
 
-        color: host.api.theme.surfaceContainer
-        radius: host.api.style.radius.md
-        border.width: 1
-        border.color: host.api.theme.outline
+        color: host.look.colors.popupBackground
+        radius: host.sizes.popupRadius
+        border.width: host.sizes.popupBorderWidth
+        border.color: host.look.colors.popupBorder
         visible: host.open
         clip: true
 

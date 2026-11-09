@@ -34,4 +34,8 @@ Singleton {
         "slow": 400,
         "easing": Easing.OutCubic
     })
+    // Line widths: `thin` is the hairline of outlines and focus rings.
+    readonly property var border: ({
+        "thin": 1
+    })
 }

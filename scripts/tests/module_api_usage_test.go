@@ -140,7 +140,8 @@ func TestItemsUseOnlyDocumentedSlotMembers(t *testing.T) {
 		t.Fatalf("docs/bar.md documents only %d slot members", len(documented))
 	}
 	var items []string
-	for _, pattern := range []string{"modules/bar-*/Item.qml", "examples/*/Item.qml"} {
+	// Every QML file of the item modules (the item and ItemLook.qml), and the example's.
+	for _, pattern := range []string{"modules/bar-*/*.qml", "examples/*/Item.qml"} {
 		m, _ := filepath.Glob(filepath.Join(repoRoot, pattern))
 		items = append(items, m...)
 	}

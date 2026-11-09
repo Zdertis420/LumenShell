@@ -22,8 +22,9 @@ func settingSchema(rule map[string]any) map[string]any {
 			out["maxItems"] = maxItems
 		}
 	}
+	// A null default means "unset" (interface 1.2): the property has no default in the schema.
 	for _, k := range []string{"default", "enum", "description", "minLength", "maxLength"} {
-		if v, ok := rule[k]; ok {
+		if v, ok := rule[k]; ok && !(k == "default" && v == nil) {
 			out[k] = v
 		}
 	}

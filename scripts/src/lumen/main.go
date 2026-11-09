@@ -718,7 +718,15 @@ func (c *controller) modulesShow(id string) *failure {
 				// Not resolved yet (for example the module is not loaded): the default applies.
 				value = rule["default"]
 			}
-			fmt.Printf("  %s: %v (%s, default %v)\n", k, value, str(rule, "type"), rule["default"])
+			// A null default (interface 1.2) means unset: the module falls back to a design token.
+			shownValue, shownDefault := fmt.Sprint(value), fmt.Sprint(rule["default"])
+			if value == nil {
+				shownValue = "(unset)"
+			}
+			if rule["default"] == nil {
+				shownDefault = "unset"
+			}
+			fmt.Printf("  %s: %s (%s, default %s)\n", k, shownValue, str(rule, "type"), shownDefault)
 		}
 	}
 	printList := func(title string, items []any, format func(any) string) {
@@ -808,6 +816,13 @@ func printInterface11(d map[string]any) {
 		}
 		if len(names) > 0 {
 			fmt.Printf("Dropped items (screen %s): %s\n", str(m, "screen"), strings.Join(names, ", "))
+		}
+	}
+	if list := anyList(d["lookWarnings"]); len(list) > 0 {
+		fmt.Println("Look warnings:")
+		for _, it := range list {
+			m, _ := it.(map[string]any)
+			fmt.Printf("  %s: %s\n", str(m, "key"), str(m, "problem"))
 		}
 	}
 	if list := anyList(d["itemWarnings"]); len(list) > 0 {

@@ -59,7 +59,9 @@
             "type": "string",
             "enum": ["string", "integer", "number", "boolean", "stringlist"]
           },
-          "default": {},
+          "default": {
+            "description": "A value of the setting's type, or null (interface 1.2) meaning unset, where the module falls back to a design token. null is not allowed for stringlist"
+          },
           "enum": {
             "type": "array",
             "items": {"type": "string"}

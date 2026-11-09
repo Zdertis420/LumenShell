@@ -1,0 +1,10 @@
+{
+  "id": "bar-item-ignores-direction",
+  "name": "Item written for a horizontal bar",
+  "version": "1.0.0",
+  "api": "1.1",
+  "permissions": ["contribute:bar"],
+  "contributions": [
+    {"id": "wide", "name": "Wide", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"}
+  ]
+}

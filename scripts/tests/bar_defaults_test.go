@@ -14,7 +14,7 @@ import (
 func scanBundled(t *testing.T) map[string]contribModule {
 	t.Helper()
 	e, r := runModules(t, "scan", map[string]any{
-		"bundledDir": filepath.Join(repoRoot, "modules"), "userDir": "", "apiVersion": "1.1",
+		"bundledDir": filepath.Join(repoRoot, "modules"), "userDir": "", "apiVersion": "1.2",
 	})
 	if !e.OK {
 		t.Fatalf("scan failed: %+v\nstderr=%s", e.Error, r.stderr)
@@ -78,7 +78,7 @@ func TestBarDeclaresItsPointCommandAndDefaults(t *testing.T) {
 			t.Errorf("%s must be a stringlist, got %v", k, s[k]["type"])
 		}
 	}
-	if !reflect.DeepEqual(s["edge"]["enum"], []any{"top", "bottom"}) {
+	if !reflect.DeepEqual(s["edge"]["enum"], []any{"top", "bottom", "left", "right"}) {
 		t.Errorf("edge enum = %v", s["edge"]["enum"])
 	}
 	// The bar's notification helper is declared and shipped.
@@ -102,7 +102,7 @@ func TestBuiltInItemsContributeToTheBar(t *testing.T) {
 		if c.ID != item || c.Target.Module != "bar" || c.Target.Point != "items" || c.Short != id || c.Key != id+"/"+item {
 			t.Errorf("%s: contribution = %+v", id, c)
 		}
-		if m.Manifest["api"] != "1.1" {
+		if m.Manifest["api"] != "1.2" {
 			t.Errorf("%s: api = %v", id, m.Manifest["api"])
 		}
 		perms, _ := m.Manifest["permissions"].([]any)
@@ -193,5 +193,41 @@ func TestDefaultListsGiveTheDefaultBar(t *testing.T) {
 	}
 	if !reflect.DeepEqual(keysOf(res.Right), []string{"bar-sound/sound", "bar-battery/battery"}) {
 		t.Errorf("right = %v", keysOf(res.Right))
+	}
+}
+
+// SC-002 of specs/004-bar-customization-styles: a user who changes nothing sees the bar of
+// Feature III. The colors are the same roles with full opacity, the style is solid on the top
+// edge, and every size is unset, so it comes from the design tokens (geometry.js, covered by
+// bar_geometry_test.qml, gives Feature III's 37, 8 and 0 for them).
+func TestBarDefaultsKeepTheLookOfFeatureIII(t *testing.T) {
+	s := manifestSettings(t, scanBundled(t)["bar"])
+	roles := map[string]string{
+		"backgroundRole": "surface", "islandRole": "surface", "frameRole": "surface",
+		"textRole": "onSurface", "focusRole": "primary",
+		"popupBackground": "surfaceContainer", "popupBorder": "outline",
+	}
+	for key, want := range roles {
+		if s[key]["default"] != want {
+			t.Errorf("%s default = %v, want %s", key, s[key]["default"], want)
+		}
+	}
+	for _, key := range []string{"backgroundOpacity", "islandOpacity", "frameOpacity"} {
+		if s[key]["default"] != float64(1) {
+			t.Errorf("%s default = %v, want 1", key, s[key]["default"])
+		}
+	}
+	if s["style"]["default"] != "solid" || s["edge"]["default"] != "top" {
+		t.Errorf("style %v, edge %v", s["style"]["default"], s["edge"]["default"])
+	}
+	// The popup keeps Feature III's border (1) and has no padding.
+	if s["popupBorderWidth"]["default"] != float64(1) || s["popupPadding"]["default"] != float64(0) {
+		t.Errorf("popup border %v, padding %v", s["popupBorderWidth"]["default"], s["popupPadding"]["default"])
+	}
+	// Every size is unset (null) so that it follows the design tokens.
+	for _, key := range []string{"thickness", "margin", "padding", "itemGap", "placeGap", "itemPadding", "itemRadius", "radius", "frameRadius", "frameBorder", "popupRadius", "fontSize", "fontFamily", "fontWeight"} {
+		if def, present := s[key]["default"]; !present || def != nil {
+			t.Errorf("%s must be unset by default, got %#v", key, def)
+		}
 	}
 }

@@ -1,0 +1,14 @@
+{
+  "id": "null-default-good",
+  "name": "Unset settings",
+  "version": "1.0.0",
+  "api": "1.2",
+  "settings": {
+    "size": {"type": "integer", "default": null, "min": 1, "max": 96},
+    "ratio": {"type": "number", "default": null, "min": 0, "max": 1},
+    "family": {"type": "string", "default": null, "maxLength": 32},
+    "role": {"type": "string", "default": null, "enum": ["primary", "surface"]},
+    "italic": {"type": "boolean", "default": null},
+    "fixed": {"type": "integer", "default": 5}
+  }
+}

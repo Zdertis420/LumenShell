@@ -106,5 +106,60 @@ TestCase {
         verify(!overlaps(r, item));
     }
 
+    // ---- specs/004-bar-customization-styles: left and right edges ----
+    function test_rightOfTheItemForALeftBar() {
+        var item = anchor(0, 200, 37, 60);
+        var r = Popup.place(item, size(200, 100), screen, "left", 0.5);
+        compare(r.x, 37);
+        compare(r.y, 180, "centered on the item along the bar");
+        compare(r.width, 200);
+        compare(r.height, 100);
+        verify(!overlaps(r, item));
+    }
+
+    function test_leftOfTheItemForARightBar() {
+        var item = anchor(963, 200, 37, 60);
+        var r = Popup.place(item, size(200, 100), screen, "right", 0.5);
+        compare(r.x, 763);
+        compare(r.width, 200);
+        compare(r.y, 180);
+        verify(!overlaps(r, item));
+    }
+
+    function test_shiftedToStayOnTheScreenAlongAVerticalBar() {
+        // Near the top and near the bottom of the screen the popup moves, and stays inside.
+        var top = Popup.place(anchor(0, 0, 37, 30), size(200, 300), screen, "left", 0.5);
+        compare(top.y, 0);
+        verify(inside(top, screen));
+        var bottom = Popup.place(anchor(0, 570, 37, 30), size(200, 300), screen, "left", 0.5);
+        compare(bottom.y, 300);
+        verify(inside(bottom, screen));
+    }
+
+    function test_limitedByTheRoomOnItsSideOfAVerticalBar() {
+        // A right bar item near the left of the screen leaves little room before it.
+        var item = anchor(40, 200, 37, 60);
+        var r = Popup.place(item, size(300, 100), screen, "right", 0.5);
+        verify(r.width <= 40);
+        verify(inside(r, screen));
+        verify(!overlaps(r, item));
+        // A left bar item near the right edge of the screen leaves little room after it.
+        item = anchor(960, 200, 37, 60);
+        r = Popup.place(item, size(300, 100), screen, "left", 0.5);
+        verify(inside(r, screen));
+        verify(!overlaps(r, item));
+    }
+
+    function test_neverOverlapsTheItemOnAnyEdge() {
+        var edges = ["top", "bottom", "left", "right"];
+        var items = [anchor(400, 0, 100, 30), anchor(400, 570, 100, 30), anchor(0, 200, 37, 60), anchor(963, 200, 37, 60)];
+        for (var i = 0; i < edges.length; i++) {
+            var r = Popup.place(items[i], size(5000, 5000), screen, edges[i], 0.5);
+            verify(!overlaps(r, items[i]), edges[i]);
+            verify(inside(r, screen), edges[i]);
+            verify(r.width <= 500 && r.height <= 300, edges[i] + " limited to half of the screen");
+        }
+    }
+
     name: "BarPopup"
 }

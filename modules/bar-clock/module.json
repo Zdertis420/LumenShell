@@ -1,8 +1,8 @@
 {
   "id": "bar-clock",
   "name": "Clock",
-  "version": "1.0.0",
-  "api": "1.1",
+  "version": "1.1.0",
+  "api": "1.2",
   "description": "Time and date for the bar.",
   "permissions": ["contribute:bar"],
   "contributions": [
@@ -10,6 +10,16 @@
   ],
   "settings": {
     "format": {"type": "string", "default": "ddd d MMM  HH:mm", "minLength": 1, "maxLength": 64, "description": "Date and time format (Qt format strings)"},
-    "seconds": {"type": "boolean", "default": false, "description": "Update every second (use a format that shows seconds)"}
+    "seconds": {"type": "boolean", "default": false, "description": "Update every second (use a format that shows seconds)"},
+    "verticalFormat": {"type": "string", "default": "HH\nmm", "minLength": 1, "maxLength": 64, "description": "Format used on a vertical bar; the default shows hours above minutes"},
+    "fontFamily": {"type": "string", "default": null, "maxLength": 128, "description": "Font family of this item; unset follows the bar"},
+    "fontSize": {"type": "integer", "default": null, "min": 1, "max": 96, "description": "Text size of this item; unset follows the bar"},
+    "fontWeight": {"type": "string", "default": null, "enum": ["thin", "light", "regular", "medium", "semibold", "bold", "black"], "description": "Text weight of this item; unset follows the bar"},
+    "fontItalic": {"type": "boolean", "default": null, "description": "Italic text in this item; unset follows the bar"},
+    "padding": {"type": "integer", "default": null, "min": 0, "max": 64, "description": "Padding of this item along the bar; unset follows the bar"},
+    "radius": {"type": "integer", "default": null, "min": 0, "max": 64, "description": "Corner radius of this item's own shapes; unset follows the bar"},
+    "backgroundRole": {"type": "string", "default": null, "enum": ["primary", "onPrimary", "secondary", "onSecondary", "tertiary", "onTertiary", "error", "onError", "background", "onBackground", "surface", "onSurface", "surfaceVariant", "onSurfaceVariant", "surfaceContainer", "outline"], "description": "Theme role of this item's own background; unset draws none"},
+    "backgroundOpacity": {"type": "number", "default": null, "min": 0, "max": 1, "description": "Opacity of this item's own background; unset means fully opaque"},
+    "textRole": {"type": "string", "default": null, "enum": ["primary", "onPrimary", "secondary", "onSecondary", "tertiary", "onTertiary", "error", "onError", "background", "onBackground", "surface", "onSurface", "surfaceVariant", "onSurfaceVariant", "surfaceContainer", "outline"], "description": "Theme role of this item's text; unset follows the bar"}
   }
 }

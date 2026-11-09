@@ -5,7 +5,9 @@ import Quickshell.Services.Pipewire
 // there is no default sound output (FR-007).
 // Pointer: left click opens an audio mixer, the wheel changes the volume, right click mutes.
 // Keyboard (while the bar has the focus): Enter opens the mixer, Up and Down change the
-// volume, M mutes (FR-016a).
+// volume, M mutes (FR-016a). The keys are not changed by feature 004.
+// On a vertical bar it shows the label above the level. Font, padding, corner radius and colors
+// follow the bar unless this module's own settings say otherwise (ItemLook.qml).
 Item {
     id: root
 
@@ -16,12 +18,14 @@ Item {
     property bool interactive: true
     readonly property int percentScale: 100 // documented constant: Pipewire reports a fraction
     readonly property int mixerTimeoutMs: 3000 // documented constant: time limit of the mixer helper
+    readonly property int twice: 2 // documented constant: padding is on both sides of the text
     readonly property var sink: Pipewire.defaultAudioSink
     readonly property var audio: sink ? sink.audio : null
     readonly property bool available: audio !== null && audio !== undefined
     readonly property bool muted: available && audio.muted
     readonly property int percent: available ? Math.round(Math.min(Math.max(audio.volume, 0), 1) * percentScale) : 0
     readonly property real maxWidth: slot ? slot.maxWidth : label.implicitWidth
+    readonly property real maxLength: slot ? slot.maxLength : label.implicitHeight
     readonly property bool focused: slot ? slot.focused : false
 
     // Changes the volume by `steps` steps of the step setting, between 0% and 100%.
@@ -51,8 +55,8 @@ Item {
     }
 
     visible: available
-    implicitWidth: available ? Math.min(label.implicitWidth + api.style.spacing.md * 2, maxWidth) : 0
-    implicitHeight: slot ? slot.thickness : label.implicitHeight
+    implicitWidth: !available ? 0 : (look.vertical ? look.thickness : Math.min(label.implicitWidth + look.padding * twice, maxWidth))
+    implicitHeight: !available ? 0 : (look.vertical ? Math.min(label.implicitHeight + look.padding * twice, maxLength) : (slot ? slot.thickness : label.implicitHeight))
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             root.openMixer();
@@ -69,17 +73,32 @@ Item {
         }
     }
 
+    ItemLook {
+        id: look
+
+        api: root.api
+        slot: root.slot
+    }
+
     // The default sink's properties are kept up to date by the tracker in Main.qml (one per
     // module, not one per item instance).
+    // The item's own background, when its settings ask for one.
+    Rectangle {
+        anchors.fill: parent
+        visible: look.hasBackground
+        color: look.backgroundColor
+        radius: look.radius
+    }
+
     // The visible focus indicator.
     Rectangle {
         anchors.fill: parent
-        anchors.margins: 1
+        anchors.margins: root.api.style.border.thin
         visible: root.focused
         color: "transparent"
-        radius: root.api.style.radius.sm
-        border.width: 1
-        border.color: root.api.theme.primary
+        radius: look.radius
+        border.width: root.api.style.border.thin
+        border.color: look.focusColor
     }
 
     Text {
@@ -87,11 +106,15 @@ Item {
 
         anchors.centerIn: parent
         width: Math.min(implicitWidth, root.width)
-        elide: Text.ElideRight
-        text: root.muted ? "Vol off" : "Vol " + root.percent + "%"
-        color: root.muted ? root.api.theme.onSurfaceVariant : root.api.theme.onSurface
-        font.family: root.api.style.font.family
-        font.pixelSize: root.api.style.font.body
+        horizontalAlignment: Text.AlignHCenter
+        elide: look.vertical ? Text.ElideNone : Text.ElideRight
+        // Vertical: the label above the level ("Vol" over "45%", "Vol" over "off").
+        text: look.vertical ? "Vol\n" + (root.muted ? "off" : root.percent + "%") : (root.muted ? "Vol off" : "Vol " + root.percent + "%")
+        color: root.muted ? root.api.theme.onSurfaceVariant : look.textColor
+        font.family: look.family
+        font.pixelSize: look.pixelSize
+        font.weight: look.weight
+        font.italic: look.italic
     }
 
     MouseArea {

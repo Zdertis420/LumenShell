@@ -1,0 +1,11 @@
+{
+  "id": "bar-item-uses-slot-1-2",
+  "name": "Item that reads the slot facts of interface 1.2",
+  "version": "1.0.0",
+  "api": "1.2",
+  "permissions": ["contribute:bar"],
+  "commands": ["facts"],
+  "contributions": [
+    {"id": "facts", "name": "Facts", "target": {"module": "bar", "point": "items"}, "file": "Item.qml"}
+  ]
+}
