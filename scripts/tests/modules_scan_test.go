@@ -28,6 +28,7 @@ type scanModule struct {
 	Manifest       map[string]any `json:"manifest"`
 	Errors         []scanProblem  `json:"errors"`
 	Warnings       []scanProblem  `json:"warnings"`
+	Fingerprint    string         `json:"fingerprint"`
 }
 
 func fixturesDir() string { return filepath.Join(repoRoot, "scripts", "tests", "fixtures", "modules") }
@@ -402,6 +403,50 @@ func TestScanNeverWrites(t *testing.T) {
 	scanDirs(t, bundled, user)
 	if after := snapshot(t, bundled) + snapshot(t, user); after != before {
 		t.Fatal("scan changed files")
+	}
+}
+
+// The fingerprint lets the shell reuse the compiled QML of an unchanged module on reload: it is the
+// same while the files are the same, changes with any file, and ignores hidden directories.
+func TestScanFingerprint(t *testing.T) {
+	user := stage(t, "good-min", "err-bad-json")
+	first := byID(scanDirs(t, "", user))
+	good := first["good-min"]
+	if !good.Valid || good.Fingerprint == "" {
+		t.Fatalf("a valid module needs a fingerprint: %+v", good)
+	}
+	for id, m := range first {
+		if !m.Valid && m.Fingerprint != "" {
+			t.Fatalf("invalid module %s has a fingerprint", id)
+		}
+	}
+	if again := byID(scanDirs(t, "", user))["good-min"]; again.Fingerprint != good.Fingerprint {
+		t.Fatalf("fingerprint changed with no change: %s -> %s", good.Fingerprint, again.Fingerprint)
+	}
+
+	hidden := filepath.Join(good.Dir, ".cache")
+	if err := os.MkdirAll(hidden, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hidden, "x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := byID(scanDirs(t, "", user))["good-min"]; got.Fingerprint != good.Fingerprint {
+		t.Fatal("a hidden directory changed the fingerprint")
+	}
+
+	if err := os.WriteFile(filepath.Join(good.Dir, "Extra.qml"), []byte("import QtQuick\nItem {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	added := byID(scanDirs(t, "", user))["good-min"]
+	if added.Fingerprint == good.Fingerprint {
+		t.Fatal("a new file did not change the fingerprint")
+	}
+	if err := os.WriteFile(filepath.Join(good.Dir, "Extra.qml"), []byte("import QtQuick\nItem { width: 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := byID(scanDirs(t, "", user))["good-min"]; got.Fingerprint == added.Fingerprint {
+		t.Fatal("an edited file did not change the fingerprint")
 	}
 }
 

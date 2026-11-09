@@ -45,6 +45,12 @@ Singleton {
     // True once Config knows the module definitions (until then `enabled` is unknown).
     property bool defsApplied: false
     property int loadCounter: 0
+    // The URL revision each module's QML was loaded under, by "id|fingerprint". The engine keeps
+    // the compiled QML of every URL it has seen, so a reload of an unchanged module (same
+    // fingerprint from the scan) reuses its revision and keeps no second copy; a changed module
+    // gets a new revision and is compiled again. Without a fingerprint every load is new.
+    property var revisions: ({
+    })
     // id -> {component, instance, api} for loaded modules.
     property var live: ({
     })
@@ -138,6 +144,25 @@ Singleton {
         return (e.field ? e.field + ": " : "") + e.problem;
     }
 
+    function revisionFor(rec) : int {
+        if (!rec.fingerprint)
+            return ++root.loadCounter;
+
+        const key = rec.id + "|" + rec.fingerprint;
+        if (root.revisions[key] === undefined)
+            root.revisions[key] = ++root.loadCounter;
+
+        return root.revisions[key];
+    }
+
+    // A load that failed is not reused: the engine may have cached the error, and the cause (a
+    // missing import, say) can be fixed without touching the module's files.
+    function forgetRevision(rec) {
+        if (rec.fingerprint)
+            delete root.revisions[rec.id + "|" + rec.fingerprint];
+
+    }
+
     function makeRecord(m, old) : variant {
         const mf = m.manifest ?? {
         };
@@ -151,6 +176,7 @@ Singleton {
             "description": mf.description ?? "",
             "manifest": mf,
             "main": m.main ?? "",
+            "fingerprint": m.fingerprint ?? "",
             "valid": m.valid,
             "errors": m.errors ?? [],
             "warnings": m.warnings ?? [],
@@ -723,7 +749,7 @@ Singleton {
                 "apiVersion": root.apiVersion,
                 "host": root
             });
-            const url = "file://" + rec.main + "?r=" + (++root.loadCounter);
+            const url = "file://" + rec.main + "?r=" + root.revisionFor(rec);
             comp = Qt.createComponent(url);
             if (comp.status !== Component.Ready) {
                 const text = comp.status === Component.Error ? comp.errorString() : "the component did not finish loading";
@@ -756,6 +782,7 @@ Singleton {
             if (api)
                 api.destroy();
 
+            root.forgetRevision(rec);
             root.fail(rec, String(e.message ?? e));
         }
     }
@@ -832,7 +859,7 @@ Singleton {
         const live = root.live[owner.id];
         let comp = null;
         try {
-            comp = Qt.createComponent("file://" + c.file + "?r=" + (++root.loadCounter));
+            comp = Qt.createComponent("file://" + c.file + "?r=" + root.revisionFor(owner));
             if (comp.status !== Component.Ready) {
                 const text = comp.status === Component.Error ? comp.errorString() : "the component did not finish loading";
                 throw new Error(text.split("\n")[0].split("file://" + owner.dir + "/").join("").trim());
@@ -860,6 +887,7 @@ Singleton {
                 comp.destroy();
 
             // The contributor failed to build its visual part: only it is marked failed.
+            root.forgetRevision(owner);
             root.unload(owner);
             root.fail(owner, c.file.split(owner.dir + "/").join("") + ": " + String(e.message ?? e));
             root.touch();

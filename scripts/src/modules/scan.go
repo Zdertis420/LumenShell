@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,10 +31,51 @@ type scanned struct {
 	ExtensionPoints []pointDecl   `json:"extensionPoints,omitempty"`
 	Contributions   []contribDecl `json:"contributions,omitempty"`
 	Commands        []string      `json:"commands,omitempty"`
+	// Fingerprint changes when any file of the module changes (names, sizes, modification
+	// times). The shell loads a module's QML under a revision of its URL and reuses the revision
+	// while the fingerprint is the same, so reloading an unchanged module keeps no second compiled
+	// copy. Only set for valid modules.
+	Fingerprint string `json:"fingerprint,omitempty"`
 
 	points   []pointDecl
 	contribs []contribDecl
 	commands []string
+}
+
+// maxFingerprintFiles bounds the files looked at for one module.
+const maxFingerprintFiles = 2000
+
+// fingerprintDir is a short hash of the relative names, sizes and modification times of the
+// files under dir (hidden directories such as .git are skipped). An unreadable tree gives "",
+// which makes the shell treat every reload as a change.
+func fingerprintDir(dir string) string {
+	h := sha256.New()
+	count := 0
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if path != dir && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if count++; count > maxFingerprintFiles {
+			return fs.SkipAll
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		fmt.Fprintf(h, "%s|%d|%d\n", rel, info.Size(), info.ModTime().UnixNano())
+		return nil
+	})
+	if err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 var unsafeDirChars = regexp.MustCompile(`[^A-Za-z0-9._-]`)
@@ -208,6 +252,7 @@ func scanAll(bundledDir, userDir string, lumen apiVersion) []scanned {
 			continue
 		}
 		out[i].publishInterface11()
+		out[i].Fingerprint = fingerprintDir(out[i].Dir)
 	}
 	if tooMany {
 		out = append(out, scanned{

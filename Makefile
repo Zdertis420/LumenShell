@@ -3,7 +3,7 @@ BIN := scripts/bin
 GO_SRC := $(wildcard scripts/src/*/*.go)
 QML := $(shell find . -name '*.qml' -not -path './.claude/*' -not -path './.specify/*' -not -path './scripts/tests/fixtures/*')
 
-.PHONY: build run fmt lint test qmltest smoke clean
+.PHONY: build run fmt lint test qmltest smoke perf clean
 
 build:
 	@mkdir -p $(BIN)
@@ -42,7 +42,12 @@ qmltest:
 	for f in $$files; do QT_QPA_PLATFORM=offscreen $(QMLTEST) -input $$f || exit 1; done
 
 smoke: build
-	scripts/tests/smoke.sh
+	scripts/tests/smoke.sh $(if $(SECTION),--section $(SECTION))
+
+# The long resource checks, run on their own (nothing else busy): memory over repeated actions
+# and idle CPU. Prints the metric / budget / fact / previous-run table at the end.
+perf: build
+	scripts/tests/smoke.sh --section 15,15c --bar-cycles 100 --style-cycles 100 --cpu-seconds 30
 
 clean:
 	rm -rf $(BIN)

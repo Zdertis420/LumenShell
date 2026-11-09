@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # End-to-end smoke test: starts a real Lumen shell and drives it with `lumen`.
 #
-#   scripts/tests/smoke.sh               run the checks
+#   scripts/tests/smoke.sh               run the checks; prints failures and a short summary only
+#   scripts/tests/smoke.sh --verbose     also print every passed check and section heading
+#   scripts/tests/smoke.sh --section 16,17   run only these sections (--list shows the ids); each
+#                                        section starts its own shell and sets up what it needs
 #   scripts/tests/smoke.sh --reload N    also trigger N theme reloads and compare memory use
 #   scripts/tests/smoke.sh --modules-cycles N   N load/unload cycles of one module
 #   scripts/tests/smoke.sh --bar-cycles N       N cycles of a bar item (load/unload), of the bar (reload),
 #                                               and of a popup (open/close), comparing memory use
 #   scripts/tests/smoke.sh --cpu-minutes M      average CPU of the idle shell with the bar, over M minutes
+#                                               (--cpu-seconds S for a shorter window)
 #   scripts/tests/smoke.sh --style-cycles N     N changes of the bar's style and edge in a row, comparing
 #                                               memory use and checking that nothing is left behind (with
 #                                               --cpu-minutes M, also the idle CPU in each of the three styles)
@@ -23,9 +27,17 @@ RELOADS=0
 CYCLES=0
 BAR_CYCLES=0
 STYLE_CYCLES=0
-CPU_MINUTES=0
+CPU_SECONDS=0
+VERBOSE=0
+SECTIONS=""
+ALL_SECTIONS="1 2 3 4 5 6 6b 7 7c 10 11 12 13 14 16 17"
+MODFIX=$FIXTURES/modules
 while [ $# -gt 0 ]; do
 	case "$1" in
+	--verbose | -v)
+		VERBOSE=1
+		shift
+		;;
 	--style-cycles)
 		STYLE_CYCLES=${2:-100}
 		shift 2
@@ -43,8 +55,21 @@ while [ $# -gt 0 ]; do
 		shift 2
 		;;
 	--cpu-minutes)
-		CPU_MINUTES=${2:-5}
+		CPU_SECONDS=$((${2:-5} * 60))
 		shift 2
+		;;
+	--cpu-seconds)
+		CPU_SECONDS=${2:-30}
+		shift 2
+		;;
+	--section)
+		SECTIONS=${2:-}
+		shift 2
+		;;
+	--list)
+		echo "sections: $ALL_SECTIONS"
+		echo "resource checks (need their options): 8 (--modules-cycles), 15 (--bar-cycles), 15c (--style-cycles), 15b (--cpu-minutes or --cpu-seconds), 9 (--reload)"
+		exit 0
 		;;
 	*)
 		echo "unknown option: $1"
@@ -52,6 +77,18 @@ while [ $# -gt 0 ]; do
 		;;
 	esac
 done
+
+# --section LIST: run only these sections (comma separated ids, as in --list).
+for id in ${SECTIONS//,/ }; do
+	case " $ALL_SECTIONS 8 15 15c 15b 9 " in
+	*" $id "*) ;;
+	*)
+		echo "unknown section: $id (see --list)"
+		exit 2
+		;;
+	esac
+done
+section_selected() { [ -z "$SECTIONS" ] || [[ ",$SECTIONS," == *",$1,"* ]]; }
 
 if [ -z "${NIRI_SOCKET:-}" ] || [ -z "${WAYLAND_DISPLAY:-}" ]; then
 	echo "SKIP: smoke test needs a niri session (NIRI_SOCKET and WAYLAND_DISPLAY)"
@@ -73,20 +110,113 @@ export LUMEN_CONFIG_FILE=$TMP/config.json
 SHELL_PID=""
 FAILED=0
 PASSED=0
+SECTION=""
+FAILED_AT_START=0
 
+# The shell's log of a section that had a failed check is kept here (the rest is thrown away), and
+# the metrics of this run are kept next to it to be compared with the next run.
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/lumen-smoke
+LOGDIR=$STATE/logs
+rm -rf "$LOGDIR"
+mkdir -p "$LOGDIR"
+FAIL_LOGS=()
+LOGN=0
+METRICS=()
+declare -A PREV_METRIC
+if [ -f "$STATE/metrics.tsv" ]; then
+	while IFS=$'\t' read -r name num; do PREV_METRIC["$name"]=$num; done <"$STATE/metrics.tsv"
+fi
+
+# Section headings are `echo "N. title"` lines: remember the section for failure messages and print
+# the heading only with --verbose. Anything else goes to the real echo.
+echo() {
+	if [ $# -eq 1 ] && [[ "$1" =~ ^[0-9]+[a-z]?\.\  ]]; then
+		SECTION=${1%% *}
+		if [ "$VERBOSE" = 1 ]; then builtin echo "$1"; fi
+		return 0
+	fi
+	builtin echo "$@"
+}
+
+SUMMARY_DONE=0
 cleanup() {
 	stop_shell
+	if [ "$SUMMARY_DONE" -eq 0 ]; then summary; fi
 	rm -rf "$TMP"
 }
 trap cleanup EXIT
 
 ok() {
 	PASSED=$((PASSED + 1))
-	echo "  ok   $1"
+	if [ "$VERBOSE" = 1 ]; then builtin echo "  ok   $1"; fi
 }
 bad() {
 	FAILED=$((FAILED + 1))
-	echo "  FAIL $1"
+	builtin echo "  FAIL [${SECTION:-0}] $1"
+}
+
+# The shell's memory in kB: proportional set size (shared pages counted fairly), else RSS.
+mem_kb() { # mem_kb [pid]
+	local pid=${1:-$SHELL_PID} v
+	v=$(awk '/^Pss:/{print $2}' "/proc/$pid/smaps_rollup" 2>/dev/null)
+	[ -n "$v" ] || v=$(ps -o rss= -p "$pid" | tr -d ' ')
+	echo "$v"
+}
+peak_kb() { awk '/^VmHWM:/{print $2}' "/proc/${1:-$SHELL_PID}/status" 2>/dev/null; }
+# Growth budgets are in RSS: the percentages of the spec (SC-007, SC-010) were set against it, and
+# PSS has a smaller base (shared pages left out), so the same growth in kB is a larger percentage.
+# PSS and the peak are shown next to it in the facts.
+rss_of() { ps -o rss= -p "${1:-$SHELL_PID}" | tr -d ' '; }
+# info_growth NAME FROM TO: a row of the summary with no budget (never fails).
+info_growth() {
+	local x10=$((($3 - $2) * 1000 / $2))
+	METRICS+=("$1|info|$(printf '%+d.%d%% (%d -> %d kB)' $((x10 / 10)) $((${x10#-} % 10)) "$2" "$3")|$x10")
+}
+
+# metric NAME BUDGET_TEXT FACT_TEXT NUMBER PASS(0|1): one row of the closing summary. NUMBER is the
+# value compared with the previous run (growth in tenths of a percent, CPU in hundredths of a percent).
+metric() {
+	METRICS+=("$1|$2|$3|$4")
+	if [ "$5" -eq 1 ]; then ok "$1 ($3, budget $2)"; else bad "$1: $3 is over the budget $2"; fi
+}
+# growth_check NAME FIRST LAST PERCENT: memory after the repeats may exceed the first measure by PERCENT.
+growth_check() {
+	local name=$1 first=$2 last=$3 pct=$4 x10 pass=0
+	x10=$(((last - first) * 1000 / first))
+	if [ "$x10" -le $((pct * 10)) ]; then pass=1; fi
+	metric "$name" "<= +${pct}%" "$(printf '%+d.%d%% RSS (%d -> %d kB; PSS %s, peak %s kB)' $((x10 / 10)) $((${x10#-} % 10)) "$first" "$last" "$(mem_kb)" "$(peak_kb)")" "$x10" "$pass"
+}
+# cpu_check NAME HUNDREDTHS: idle CPU must stay under 1% of one core (spec SC-010).
+cpu_check() {
+	local pass=0
+	if [ "$2" -lt 100 ]; then pass=1; fi
+	metric "$1" "< 1%" "$(printf '%d.%02d%% of one core' $(($2 / 100)) $(($2 % 100)))" "$2" "$pass"
+}
+summary() {
+	local row name budget fact num prev
+	SUMMARY_DONE=1
+	if [ ${#METRICS[@]} -gt 0 ]; then
+		builtin echo
+		printf '%-52s %-10s %-44s %s\n' "metric" "budget" "fact" "previous run"
+		# A run of some sections keeps the saved values of the metrics it did not measure.
+		declare -A SAVED=()
+		for name in "${!PREV_METRIC[@]}"; do SAVED["$name"]=${PREV_METRIC[$name]}; done
+		for row in "${METRICS[@]}"; do
+			IFS='|' read -r name budget fact num <<<"$row"
+			prev=${PREV_METRIC[$name]:-}
+			printf '%-52s %-10s %-44s %s\n' "$name" "$budget" "$fact" "${prev:--}"
+			SAVED["$name"]=$num
+		done
+		: >"$STATE/metrics.new"
+		for name in "${!SAVED[@]}"; do printf '%s\t%s\n' "$name" "${SAVED[$name]}" >>"$STATE/metrics.new"; done
+		mv "$STATE/metrics.new" "$STATE/metrics.tsv"
+	fi
+	builtin echo
+	builtin echo "passed: $PASSED, failed: $FAILED"
+	if [ ${#FAIL_LOGS[@]} -gt 0 ]; then
+		builtin echo "logs of the failed checks:"
+		printf '  %s\n' "${FAIL_LOGS[@]}"
+	fi
 }
 check() { # check "description" command...
 	local desc=$1
@@ -96,14 +226,15 @@ check() { # check "description" command...
 now_ms() { echo $(($(date +%s%N) / 1000000)); }
 
 start_shell() { # start_shell [VAR=value ...]
+	FAILED_AT_START=$FAILED
 	env "$@" "$LUMEN" start >"$TMP/shell.log" 2>&1 &
 	SHELL_PID=$!
 	local i
-	for i in $(seq 1 50); do
+	for i in $(seq 1 100); do
 		if env "$@" "$LUMEN" version 2>/dev/null | grep -q "shell: running, protocol 1"; then
 			return 0
 		fi
-		sleep 0.1
+		sleep 0.05
 	done
 	return 1
 }
@@ -114,9 +245,17 @@ stop_shell() {
 		wait "$SHELL_PID" 2>/dev/null
 	fi
 	SHELL_PID=""
+	# Keep the log only when a check failed while this shell ran.
+	if [ "$FAILED" -gt "$FAILED_AT_START" ] && [ -f "$TMP/shell.log" ]; then
+		LOGN=$((LOGN + 1))
+		cp "$TMP/shell.log" "$LOGDIR/${SECTION:-0}-$LOGN.log"
+		FAIL_LOGS+=("[${SECTION:-0}] $LOGDIR/${SECTION:-0}-$LOGN.log")
+		FAILED_AT_START=$FAILED
+	fi
 }
 
 # ---- 1. Normal shell ----
+section_1() {
 echo "1. start, commands, config"
 rm -f "$LUMEN_CONFIG_FILE"
 if start_shell; then ok "shell starts and answers lumen version right away"; else
@@ -171,7 +310,10 @@ code=$?
 [ $code -eq 3 ] && ok "no shell: exit 3" || bad "no shell: exit 3 (got $code)"
 [ "$(cat "$LUMEN_CONFIG_FILE")" = "{broken" ] && ok "no shell: nothing written" || bad "no shell: nothing written"
 
+}
+
 # ---- 2. A helper that hangs ----
+section_2() {
 echo "2. hanging helper"
 mkdir -p "$TMP/hang"
 ln -s "$ROOT/scripts/bin/config" "$TMP/hang/config"
@@ -193,7 +335,10 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 3. A helper that fails ----
+section_3() {
 echo "3. failing helper"
 mkdir -p "$TMP/fail"
 ln -s "$FIXTURES/helper-fail.sh" "$TMP/fail/config"
@@ -212,6 +357,8 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 4. Modules ----
 wait_log() { # wait_log pattern seconds: wait until the shell log has a line matching pattern
 	local i
@@ -222,6 +369,7 @@ wait_log() { # wait_log pattern seconds: wait until the shell log has a line mat
 	return 1
 }
 
+section_4() {
 echo "4. modules: discovery, enabling, unloading"
 UM="$TMP/user-modules"
 mkdir -p "$UM"
@@ -250,7 +398,10 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 5. Module API ----
+section_5() {
 echo "5. modules: the public interface and permissions"
 MODFIX="$ROOT/scripts/tests/fixtures/modules"
 UM2="$TMP/user-modules-api"
@@ -289,7 +440,10 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 6. Module settings ----
+section_6() {
 echo "6. modules: settings"
 UM3="$TMP/user-modules-settings"
 mkdir -p "$UM3"
@@ -317,6 +471,9 @@ else
 fi
 stop_shell
 
+}
+
+section_6b() {
 echo "6b. modules: a module writes its own settings"
 UM4="$TMP/user-modules-writer"
 mkdir -p "$UM4"
@@ -336,6 +493,8 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 7. Isolation: a broken module only breaks itself ----
 count_log() { grep -c -- "$1" "$TMP/shell.log"; }
 wait_count() { # wait_count pattern count seconds
@@ -347,6 +506,14 @@ wait_count() { # wait_count pattern count seconds
 	return 1
 }
 
+apply_config() { # apply_config 'json': write the config file and wait until the shell has resolved it
+	local n
+	n=$(count_log 'config resolved' 2>/dev/null || true)
+	printf '%s\n' "${1}" >"$LUMEN_CONFIG_FILE"
+	[ -n "$SHELL_PID" ] || return 0
+	wait_count 'config resolved' $((n + 1)) 3 || true
+}
+section_7() {
 echo "7. modules: isolation of broken modules"
 UM5="$TMP/user-modules-broken"
 mkdir -p "$UM5"
@@ -389,7 +556,10 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 7c. Module commands ----
+section_7c() {
 echo "7c. modules: lumen modules commands"
 UM7="$TMP/user-modules-cmds"
 mkdir -p "$UM7"
@@ -468,15 +638,9 @@ stop_shell
 "$LUMEN" modules list >/dev/null 2>&1
 [ $? -eq 3 ] && ok "with no shell, modules list exits 3" || bad "with no shell, modules list exits 3"
 
+}
+
 # ---- 10. The bar: configuration in the file (specs/003-bar quickstart steps 3) ----
-echo "10. the bar"
-UMB="$TMP/user-modules-bar"
-mkdir -p "$UMB"
-STUBS="$TMP/stubs"
-mkdir -p "$STUBS"
-printf '#!/bin/sh\necho "$@" >>"%s/notify.log"\n' "$TMP" >"$STUBS/notify-send"
-chmod +x "$STUBS/notify-send"
-rm -f "$TMP/notify.log"
 bar_layers() { niri msg layers 2>/dev/null | grep -c 'Namespace: "lumen-bar"$'; }
 bar_outputs() { niri msg outputs 2>/dev/null | grep -c '^Output'; }
 bar_first_output() { niri msg outputs 2>/dev/null | sed -n 's/^Output .*(\(.*\))$/\1/p' | head -1; }
@@ -488,6 +652,15 @@ bar_wait_layers() { # bar_wait_layers N seconds
 	done
 	return 1
 }
+section_10() {
+echo "10. the bar"
+UMB="$TMP/user-modules-bar"
+mkdir -p "$UMB"
+STUBS="$TMP/stubs"
+mkdir -p "$STUBS"
+printf '#!/bin/sh\necho "$@" >>"%s/notify.log"\n' "$TMP" >"$STUBS/notify-send"
+chmod +x "$STUBS/notify-send"
+rm -f "$TMP/notify.log"
 printf '{"log":{"level":"debug"}}\n' >"$LUMEN_CONFIG_FILE"
 if start_shell LUMEN_USER_MODULES_DIR="$UMB" PATH="$STUBS:$PATH"; then
 	wait_log 'module:bar","msg":"bar loaded' 5 || true
@@ -538,14 +711,17 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 11. Another module adds an item to the bar (quickstart step 4, and the limits) ----
+section_11() {
 echo "11. contributing to the bar"
 UMC="$TMP/user-modules-contrib"
 rm -rf "$UMC"
 mkdir -p "$UMC"
 cp -r "$ROOT/examples/hello-bar-item" "$MODFIX/bar-item-wrong-point" "$MODFIX/bar-item-target-missing" "$MODFIX/bar-item-two" "$UMC/"
 cfg() { # cfg "<modules json fragment>": a config file with debug logging
-	printf '{"log":{"level":"debug"},"modules":{%s}}\n' "$1" >"$LUMEN_CONFIG_FILE"
+	apply_config "$(printf '{"log":{"level":"debug"},"modules":{%s}}' "$1")"
 }
 cfg ''
 if start_shell LUMEN_USER_MODULES_DIR="$UMC"; then
@@ -569,7 +745,6 @@ if start_shell LUMEN_USER_MODULES_DIR="$UMC"; then
 
 	# Its own setting, live.
 	cfg '"bar":{"left":["hello-bar-item"]},"hello-bar-item":{"text":"Changed"}'
-	sleep 1.5
 	check "the item's own setting reaches the module" grep -q 'text: Changed' < <("$LUMEN" modules show hello-bar-item 2>&1)
 
 	# Disabling removes the item and leaves nothing behind.
@@ -587,16 +762,14 @@ if start_shell LUMEN_USER_MODULES_DIR="$UMC"; then
 
 	# Short names: the first-declared item has one, the second needs the long form.
 	cfg '"bar":{"left":["bar-item-two","bar-item-two/b","bar-item-two/a"]},"bar-item-two":{"enabled":true}'
-	sleep 2
 	SHOW=$("$LUMEN" modules show bar 2>&1)
 	check "the short name and the long name of the first item are one item" grep -q 'left\[2\]: .*bar-item-two/a.*: duplicate of left entry 0' <<<"$SHOW"
 	check "the second item is placed by its long name" grep -Eq 'bar-item-two/b +.* +shown' <<<"$SHOW" || check "the second item is placed by its long name" grep -Eq 'bar-item-two/b +shown' <<<"$SHOW"
 
 	# The bar disabled: contributors wait; enabled again: the items return.
 	cfg '"bar":{"left":["bar-item-two"]},"bar-item-two":{"enabled":true}'
-	sleep 1.5
 	"$LUMEN" modules disable bar >/dev/null 2>&1
-	sleep 1.5
+	wait_log 'module:bar","msg":"unloaded"' 3 || true
 	SHOW=$("$LUMEN" modules show bar-item-two 2>&1)
 	check "with the bar disabled the contributor stays loaded" grep -Eq 'state: loaded' <<<"$SHOW"
 	check "and its item waits for the bar" grep -Eq 'bar-item-two/a +bar-item-two +bar/items +waiting \(module bar is not loaded\)' <<<"$SHOW"
@@ -649,7 +822,10 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 12. Theme and keyboard (quickstart step 5) ----
+section_12() {
 echo "12. theme and keyboard"
 UMT="$TMP/user-modules-theme"
 rm -rf "$UMT"
@@ -685,7 +861,10 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 13. Broken items do not break the bar (quickstart step 6) ----
+section_13() {
 echo "13. broken bar items"
 UMI="$TMP/user-modules-broken"
 rm -rf "$UMI"
@@ -734,7 +913,10 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 14. Popups (quickstart step 8) ----
+section_14() {
 echo "14. popups"
 UMP="$TMP/user-modules-popup"
 rm -rf "$UMP"
@@ -770,13 +952,11 @@ if start_shell LUMEN_USER_MODULES_DIR="$UMP"; then
 	sleep 1.5
 	"$LUMEN" modules call bar-item-popup cycle >/dev/null 2>&1
 	sleep 1
-	FIRST=$(ps -o rss= -p "$SHELL_PID" | tr -d ' ')
+	FIRST=$(rss_of)
 	for i in 1 2 3 4 5; do "$LUMEN" modules call bar-item-popup cycle >/dev/null 2>&1; done
 	sleep 1
-	LAST=$(ps -o rss= -p "$SHELL_PID" | tr -d ' ')
-	LIMIT=$((FIRST + FIRST / 10))
-	echo "  rss after the first 100 cycles: ${FIRST} kB, after 600: ${LAST} kB (limit ${LIMIT} kB)"
-	[ "$LAST" -le "$LIMIT" ] && ok "memory within 10% over 600 popup open and close cycles" || bad "memory grew more than 10% over the popup cycles"
+	LAST=$(rss_of)
+	growth_check "popup: 600 open/close cycles, memory" "$FIRST" "$LAST" 10
 	ERRS=$(grep -E 'ReferenceError|Unable to assign|TypeError' "$TMP/shell.log" | head -3 | cut -c1-300)
 	if [ -z "$ERRS" ]; then ok "no QML errors"; else
 		bad "no QML errors"
@@ -788,14 +968,11 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 16. Bar styles, edges, settings, keyboard (specs/004-bar-customization-styles, quickstart steps 3 to 7) ----
-echo "16. bar styles and edges"
-UMS="$TMP/user-modules-styles"
-rm -rf "$UMS"
-mkdir -p "$UMS"
-cp -r "$MODFIX/bar-item-popup" "$UMS/"
 barcfg() { # barcfg '"style":"islands","edge":"left"' ['"other-module":{...}']: a config with debug logging
-	printf '{"log":{"level":"debug"},"modules":{"bar":{%s}%s}}\n' "$1" "${2:+,$2}" >"$LUMEN_CONFIG_FILE"
+	apply_config "$(printf '{"log":{"level":"debug"},"modules":{"bar":{%s}%s}}' "$1" "${2:+,$2}")"
 }
 bar_surfaces() { # the names of the bar's surfaces on one output, sorted, on one line
 	niri msg layers 2>/dev/null | awk -v out="$1" '/^Output /{cur=index($0, "\"" out "\"")>0} cur&&/Namespace: "lumen-bar/{s=$0; sub(/.*Namespace: "/,"",s); sub(/"$/,"",s); print s}' | LC_ALL=C sort | tr '\n' ' '
@@ -824,6 +1001,12 @@ wait_surfaces() { # wait_surfaces output "expected" seconds
 	return 1
 }
 look_line() { grep "look on $1: " "$TMP/shell.log" | tail -1; } # the bar's last resolved look for an output
+section_16() {
+echo "16. bar styles and edges"
+UMS="$TMP/user-modules-styles"
+rm -rf "$UMS"
+mkdir -p "$UMS"
+cp -r "$MODFIX/bar-item-popup" "$UMS/"
 barcfg ''
 if start_shell LUMEN_USER_MODULES_DIR="$UMS"; then
 	wait_log 'module:bar","msg":"bar loaded' 5 || true
@@ -934,11 +1117,9 @@ SETTINGS
 	barcfg '"style":"islands","islandOpacity":0'
 	wait_log "look on $O1: .*colors=#[0-9a-f]*,#00" 4 && ok "islandOpacity 0 makes the islands transparent" || bad "islandOpacity 0 makes the islands transparent"
 	barcfg '"backgroundRole":"primary","islandRole":"error","frameRole":"tertiary","popupBackground":"secondary","popupBorder":"primary"'
-	sleep 1.5
 	LOOK=$(look_line "$O1")
 	[ -n "$LOOK" ] && [ "$LOOK" != "$BASELINE" ] && ok "role settings change the resolved colors" || bad "role settings change the resolved colors"
 	barcfg ''
-	sleep 1.5
 	# (Colors are left out: an earlier step changed the theme of this shell.)
 	NOW_LOOK=$(look_line "$O1" | sed 's/^.*look on//; s/colors=[^ ]* //')
 	WAS_LOOK=$(echo "$BASELINE" | sed 's/^.*look on//; s/colors=[^ ]* //')
@@ -951,7 +1132,6 @@ SETTINGS
 
 	# Bad values fall back for that key only and name it (quickstart step 6).
 	barcfg '"thickness":-4,"margin":5000,"fontSize":"big","backgroundRole":"sparkles","islandOpacity":3,"frameBorder":900,"fontFamily":"No Such Font"'
-	sleep 2
 	SHOW=$("$LUMEN" modules show bar 2>&1)
 	for key in thickness margin fontSize backgroundRole islandOpacity frameBorder; do
 		check "a bad $key is reported with its key" grep -Eq "^  $key: must be " <<<"$SHOW"
@@ -966,12 +1146,12 @@ SETTINGS
 	OUT=$("$LUMEN" modules call bar-item-popup open 2>&1)
 	CLOSED=$(count_log 'popup closed for bar-item-popup/x')
 	barcfg '"left":["bar-item-popup"],"edge":"bottom"' "$POPUPMOD"
-	sleep 1.5
+	wait_count 'popup closed for bar-item-popup/x' $((CLOSED + 1)) 3 || true
 	[ "$OUT" = "true" ] && [ "$(count_log 'popup closed for bar-item-popup/x')" -gt "$CLOSED" ] && ok "changing the edge closes an open popup" || bad "changing the edge closes an open popup (open: $OUT)"
 	"$LUMEN" modules call bar-item-popup open >/dev/null 2>&1
 	CLOSED=$(count_log 'popup closed for bar-item-popup/x')
 	barcfg '"left":["bar-item-popup"],"edge":"bottom","style":"islands"' "$POPUPMOD"
-	sleep 1.5
+	wait_count 'popup closed for bar-item-popup/x' $((CLOSED + 1)) 3 || true
 	[ "$(count_log 'popup closed for bar-item-popup/x')" -gt "$CLOSED" ] && ok "changing the style closes an open popup" || bad "changing the style closes an open popup"
 
 	# Principle VIII: the popup holds the keyboard only while open; the bar only after its focus command.
@@ -984,7 +1164,6 @@ SETTINGS
 	POPUP_SURF=$(niri msg layers 2>/dev/null | grep -c 'Namespace: "lumen-bar-popup"')
 	[ "$POPUP_SURF" -eq 0 ] && ok "a closed popup leaves no surface and no keyboard focus" || bad "a closed popup leaves a surface"
 	barcfg '"left":["bar-item-popup"]' "$POPUPMOD"
-	sleep 1.5
 	[ "$(bar_keyboard_taken "$O1")" -eq 0 ] && ok "before the focus command no bar surface takes the keyboard" || bad "a bar surface takes the keyboard before the focus command"
 	OUT=$("$LUMEN" modules call bar focus 2>&1)
 	if [[ "$OUT" == focus\ on\ * ]]; then
@@ -1004,7 +1183,10 @@ else
 fi
 stop_shell
 
+}
+
 # ---- 17. Items follow the bar (specs/004-bar-customization-styles, quickstart step 7) ----
+section_17() {
 echo "17. items follow the bar"
 UMI="$TMP/user-modules-items"
 rm -rf "$UMI"
@@ -1020,7 +1202,6 @@ if start_shell LUMEN_USER_MODULES_DIR="$UMI"; then
 	FACTS=$(facts)
 	[[ "$FACTS" == *"vertical=false edge=top thickness=37"* ]] && ok "an item of interface 1.2 reads the slot facts of a horizontal bar" || bad "slot facts of a horizontal bar (got: $FACTS)"
 	barcfg "$LISTS,\"edge\":\"left\"" "$ITEMS"
-	sleep 1.5
 	FACTS=$(facts)
 	[[ "$FACTS" == *"vertical=true edge=left thickness=37"* && "$FACTS" == *"maxWidth=37"* ]] && ok "the facts follow the edge; maxWidth is the thickness on a vertical bar" || bad "slot facts of a vertical bar (got: $FACTS)"
 	SHOW=$("$LUMEN" modules show bar 2>&1)
@@ -1030,7 +1211,6 @@ if start_shell LUMEN_USER_MODULES_DIR="$UMI"; then
 
 	# The bar's font, padding and roles reach every item, built in or not.
 	barcfg "$LISTS,\"fontSize\":15,\"itemPadding\":5,\"itemRadius\":9,\"textRole\":\"error\",\"focusRole\":\"tertiary\"" "$ITEMS"
-	sleep 1.5
 	FACTS=$(facts)
 	[[ "$FACTS" == *"fontSize=15"* && "$FACTS" == *"itemPadding=5"* && "$FACTS" == *"itemRadius=9"* && "$FACTS" == *"textRole=error"* && "$FACTS" == *"focusRole=tertiary"* ]] && ok "an item of interface 1.2 follows the bar's font, padding, radius and roles" || bad "the facts follow the bar's settings (got: $FACTS)"
 	for id in bar-clock bar-sound bar-battery; do
@@ -1046,7 +1226,6 @@ if start_shell LUMEN_USER_MODULES_DIR="$UMI"; then
 
 	# A bad own setting falls back for that key only.
 	barcfg "$LISTS" "$ITEMS,\"bar-clock\":{\"fontSize\":0,\"backgroundRole\":\"sparkles\"}"
-	sleep 1.5
 	SHOW=$("$LUMEN" modules show bar-clock 2>&1)
 	check "a bad item font size is reported with its key" grep -Eq '^  fontSize: must be ' <<<"$SHOW"
 	check "a bad item background role is reported with its key" grep -Eq '^  backgroundRole: must be ' <<<"$SHOW"
@@ -1062,8 +1241,15 @@ else
 fi
 stop_shell
 
+}
+
+# The sections run in this order (the ids of --list); the resource checks below follow.
+for id in $ALL_SECTIONS; do
+	if section_selected "$id"; then "section_$id"; fi
+done
+
 # ---- 8. Module load/unload memory check ----
-if [ "$CYCLES" -gt 0 ]; then
+if [ "$CYCLES" -gt 0 ] && section_selected 8; then
 	echo "8. $CYCLES module load/unload cycles"
 	UM6="$TMP/user-modules-cycles"
 	mkdir -p "$UM6"
@@ -1078,15 +1264,13 @@ if [ "$CYCLES" -gt 0 ]; then
 			wait_count 'module:qml-good-window","msg":"unloaded"' "$i" 3 || { bad "cycle $i: module did not unload"; break; }
 			if [ "$i" -eq 1 ]; then
 				sleep 0.5
-				first=$(ps -o rss= -p "$SHELL_PID" | tr -d ' ')
+				first=$(rss_of)
 			fi
 		done
 		sleep 1
-		last=$(ps -o rss= -p "$SHELL_PID" | tr -d ' ')
+		last=$(rss_of)
 		if [ -n "$first" ]; then
-			limit=$((first + first / 10))
-			echo "  rss after first cycle: ${first} kB, after $CYCLES: ${last} kB (limit ${limit} kB)"
-			[ "$last" -le "$limit" ] && ok "memory within 10% after $CYCLES load/unload cycles" || bad "memory grew more than 10% over $CYCLES cycles"
+			growth_check "module: $CYCLES load/unload cycles, memory" "$first" "$last" 10
 		fi
 	else
 		bad "shell did not start for the module cycle check"
@@ -1095,8 +1279,7 @@ if [ "$CYCLES" -gt 0 ]; then
 fi
 
 # ---- 15. The bar: memory and CPU (quickstart step 10) ----
-rss_of() { ps -o rss= -p "$SHELL_PID" | tr -d ' '; }
-if [ "$BAR_CYCLES" -gt 0 ]; then
+if [ "$BAR_CYCLES" -gt 0 ] && section_selected 15; then
 	echo "15. $BAR_CYCLES bar cycles"
 	UMR="$TMP/user-modules-bar-cycles"
 	rm -rf "$UMR"
@@ -1118,25 +1301,31 @@ if [ "$BAR_CYCLES" -gt 0 ]; then
 		done
 		sleep 1
 		last=$(rss_of)
-		limit=$((first + first / 10))
-		echo "  contributor: rss after the first cycle ${first} kB, after $BAR_CYCLES: ${last} kB (limit ${limit} kB)"
-		[ "$last" -le "$limit" ] && ok "memory within 10% over $BAR_CYCLES contributor load/unload cycles" || bad "memory grew more than 10% over the contributor cycles"
+		growth_check "bar: $BAR_CYCLES contributor load/unload cycles, memory" "$first" "$last" 10
 		# The bar reloaded N times.
 		first=""
+		mid=""
 		for i in $(seq 1 "$BAR_CYCLES"); do
 			"$LUMEN" modules reload bar >/dev/null 2>&1
 			if [ "$i" -eq 1 ]; then
 				sleep 0.5
 				first=$(rss_of)
+			elif [ "$i" -eq $((BAR_CYCLES / 2)) ]; then
+				sleep 0.5
+				mid=$(rss_of)
 			fi
 		done
 		sleep 1
 		last=$(rss_of)
+		# The growth of each half (information rows, not budgets): about equal halves mean each reload
+		# keeps its compiled QML (the file is loaded under a new URL each time, Modules.qml).
+		if [ -n "$mid" ]; then
+			info_growth "bar: reloads 1..$((BAR_CYCLES / 2)), RSS (first half)" "$first" "$mid"
+			info_growth "bar: reloads $((BAR_CYCLES / 2))..$BAR_CYCLES, RSS (second half)" "$mid" "$last"
+		fi
 		# 10% plus a 2-point margin for measurement noise (runs vary by about 1.5 points, and 100
 		# reloads in a row is a stress test, far beyond real use). See research.md, "Measurements".
-		limit=$((first + first * 12 / 100))
-		echo "  bar reloads: rss after the first ${first} kB, after $BAR_CYCLES: ${last} kB (limit ${limit} kB)"
-		[ "$last" -le "$limit" ] && ok "memory within 12% over $BAR_CYCLES bar reloads" || bad "memory grew more than 12% over the bar reloads"
+		growth_check "bar: $BAR_CYCLES reloads, memory" "$first" "$last" 12
 		# No item duplicated or left behind: created minus removed is what is shown now.
 		made=$(count_log 'created item')
 		gone=$(count_log 'removed item')
@@ -1149,16 +1338,14 @@ if [ "$BAR_CYCLES" -gt 0 ]; then
 		for i in $(seq 1 $((BAR_CYCLES / 100 + 1))); do "$LUMEN" modules call bar-item-popup cycle >/dev/null 2>&1; done
 		sleep 1
 		last=$(rss_of)
-		limit=$((first + first / 10))
-		echo "  popups: rss after 100 cycles ${first} kB, after more: ${last} kB (limit ${limit} kB)"
-		[ "$last" -le "$limit" ] && ok "memory within 10% over popup open and close cycles" || bad "memory grew more than 10% over the popup cycles"
+		growth_check "bar: popup open/close cycles, memory" "$first" "$last" 10
 	else
 		bad "shell did not start for the bar cycle checks"
 	fi
 	stop_shell
 fi
 
-if [ "$STYLE_CYCLES" -gt 0 ]; then
+if [ "$STYLE_CYCLES" -gt 0 ] && section_selected 15c; then
 	echo "15c. $STYLE_CYCLES style and edge changes"
 	UMY="$TMP/user-modules-style-cycles"
 	rm -rf "$UMY"
@@ -1188,26 +1375,23 @@ if [ "$STYLE_CYCLES" -gt 0 ]; then
 		wait_surfaces "$O1" "lumen-bar " 6 && ok "after the changes only the bar's own surface is left" || bad "surfaces left behind after the changes (got: $(bar_surfaces "$O1"))"
 		sleep 1
 		last=$(rss_of)
-		limit=$((first + first * 12 / 100))
-		echo "  style and edge changes: rss after the first ${first} kB, after $STYLE_CYCLES: ${last} kB (limit ${limit} kB)"
-		[ "$last" -le "$limit" ] && ok "memory within 12% over $STYLE_CYCLES style and edge changes" || bad "memory grew more than 12% over the style and edge changes"
+		growth_check "bar: $STYLE_CYCLES style and edge changes, memory" "$first" "$last" 12
 		made=$(count_log 'created item bar-clock/clock')
 		[ "$made" -eq "$OUTPUTS" ] && ok "no item was created again by the changes ($made)" || bad "items were created $made times, want $OUTPUTS"
 		check "no item was removed by the changes" bash -c "! grep -q 'removed item bar-clock/clock' '$TMP/shell.log'"
 		check "no QML errors or binding loops" bash -c "! grep -E 'TypeError|ReferenceError|Unable to assign|Binding loop' '$TMP/shell.log'"
 		# Idle CPU in each style, over the same window as the check below.
-		if [ "$CPU_MINUTES" -gt 0 ]; then
+		if [ "$CPU_SECONDS" -gt 0 ]; then
 			ticks() { awk '{print $14 + $15}' "/proc/$SHELL_PID/stat"; }
 			hz=$(getconf CLK_TCK)
 			for style in solid islands frame; do
 				barcfg "\"style\":\"$style\""
 				sleep 3
 				t0=$(ticks)
-				sleep $((CPU_MINUTES * 60))
+				sleep "$CPU_SECONDS"
 				t1=$(ticks)
-				hundredths=$(((t1 - t0) * 10000 / hz / (CPU_MINUTES * 60)))
-				echo "  $style: average CPU $((hundredths / 100)).$(printf '%02d' $((hundredths % 100)))% of one core over $CPU_MINUTES minute(s)"
-				[ "$hundredths" -lt 100 ] && ok "idle CPU in the $style style is under 1%" || bad "idle CPU in the $style style is 1% or more"
+				hundredths=$(((t1 - t0) * 10000 / hz / CPU_SECONDS))
+				cpu_check "bar: idle CPU, $style style (${CPU_SECONDS} s)" "$hundredths"
 			done
 		fi
 	else
@@ -1216,20 +1400,19 @@ if [ "$STYLE_CYCLES" -gt 0 ]; then
 	stop_shell
 fi
 
-if [ "$CPU_MINUTES" -gt 0 ]; then
-	echo "15b. idle CPU over $CPU_MINUTES minute(s)"
+if [ "$CPU_SECONDS" -gt 0 ] && section_selected 15b; then
+	echo "15b. idle CPU over $CPU_SECONDS s"
 	printf '{}\n' >"$LUMEN_CONFIG_FILE"
 	if start_shell LUMEN_USER_MODULES_DIR="$TMP/none"; then
 		sleep 3
 		ticks() { awk '{print $14 + $15}' "/proc/$SHELL_PID/stat"; }
 		hz=$(getconf CLK_TCK)
 		t0=$(ticks)
-		sleep $((CPU_MINUTES * 60))
+		sleep "$CPU_SECONDS"
 		t1=$(ticks)
 		# percent of one core: ticks / hz / seconds * 100, in hundredths to stay in integers
-		hundredths=$(((t1 - t0) * 10000 / hz / (CPU_MINUTES * 60)))
-		echo "  average CPU: $((hundredths / 100)).$(printf '%02d' $((hundredths % 100)))% of one core over $CPU_MINUTES minute(s)"
-		[ "$hundredths" -lt 100 ] && ok "idle CPU with the bar and its built-in items is under 1%" || bad "idle CPU is 1% or more"
+		hundredths=$(((t1 - t0) * 10000 / hz / CPU_SECONDS))
+		cpu_check "shell: idle CPU with the bar (${CPU_SECONDS} s)" "$hundredths"
 	else
 		bad "shell did not start for the CPU check"
 	fi
@@ -1237,7 +1420,7 @@ if [ "$CPU_MINUTES" -gt 0 ]; then
 fi
 
 # ---- 9. Reload memory check ----
-if [ "$RELOADS" -gt 0 ]; then
+if [ "$RELOADS" -gt 0 ] && section_selected 9; then
 	echo "9. $RELOADS reloads"
 	rm -f "$LUMEN_CONFIG_FILE"
 	if start_shell; then
@@ -1247,20 +1430,18 @@ if [ "$RELOADS" -gt 0 ]; then
 			"$LUMEN" theme "$theme" --temp >/dev/null 2>&1
 			if [ "$i" -eq 1 ]; then
 				sleep 0.5
-				first=$(ps -o rss= -p "$SHELL_PID" | tr -d ' ')
+				first=$(rss_of)
 			fi
 		done
 		sleep 1
-		last=$(ps -o rss= -p "$SHELL_PID" | tr -d ' ')
-		limit=$((first + first / 10))
-		echo "  rss after first reload: ${first} kB, after $RELOADS: ${last} kB (limit ${limit} kB)"
-		[ "$last" -le "$limit" ] && ok "memory within 10% after $RELOADS reloads" || bad "memory grew more than 10%"
+		last=$(rss_of)
+		growth_check "theme: $RELOADS reloads, memory" "$first" "$last" 10
 	else
 		bad "shell did not start for the reload test"
 	fi
 	stop_shell
 fi
 
-echo
-echo "passed: $PASSED, failed: $FAILED"
+stop_shell
+summary
 [ "$FAILED" -eq 0 ]
