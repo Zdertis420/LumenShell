@@ -11,6 +11,9 @@
 #                                               and of a popup (open/close), comparing memory use
 #   scripts/tests/smoke.sh --cpu-minutes M      average CPU of the idle shell with the bar, over M minutes
 #                                               (--cpu-seconds S for a shorter window)
+#   scripts/tests/smoke.sh --prism-cycles N     N opens and closes of the Prism window in a row, comparing
+#                                               memory use and checking that no surface is left behind
+#                                               (Prism's checks that need a person are listed in section 18)
 #   scripts/tests/smoke.sh --style-cycles N     N changes of the bar's style and edge in a row, comparing
 #                                               memory use and checking that nothing is left behind (with
 #                                               --cpu-minutes M, also the idle CPU in each of the three styles)
@@ -30,7 +33,8 @@ STYLE_CYCLES=0
 CPU_SECONDS=0
 VERBOSE=0
 SECTIONS=""
-ALL_SECTIONS="1 2 3 4 5 6 6b 7 7c 10 11 12 13 14 16 17"
+ALL_SECTIONS="1 2 3 4 5 6 6b 7 7c 10 11 12 13 14 16 17 18"
+PRISM_CYCLES=0
 MODFIX=$FIXTURES/modules
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -40,6 +44,10 @@ while [ $# -gt 0 ]; do
 		;;
 	--style-cycles)
 		STYLE_CYCLES=${2:-100}
+		shift 2
+		;;
+	--prism-cycles)
+		PRISM_CYCLES=${2:-100}
 		shift 2
 		;;
 	--reload)
@@ -68,7 +76,7 @@ while [ $# -gt 0 ]; do
 		;;
 	--list)
 		echo "sections: $ALL_SECTIONS"
-		echo "resource checks (need their options): 8 (--modules-cycles), 15 (--bar-cycles), 15c (--style-cycles), 15b (--cpu-minutes or --cpu-seconds), 9 (--reload)"
+		echo "resource checks (need their options): 8 (--modules-cycles), 15 (--bar-cycles), 15c (--style-cycles), 15b (--cpu-minutes or --cpu-seconds), 9 (--reload), 18c (--prism-cycles)"
 		exit 0
 		;;
 	*)
@@ -80,7 +88,7 @@ done
 
 # --section LIST: run only these sections (comma separated ids, as in --list).
 for id in ${SECTIONS//,/ }; do
-	case " $ALL_SECTIONS 8 15 15c 15b 9 " in
+	case " $ALL_SECTIONS 8 15 15c 15b 9 18c " in
 	*" $id "*) ;;
 	*)
 		echo "unknown section: $id (see --list)"
@@ -412,7 +420,7 @@ if start_shell LUMEN_USER_MODULES_DIR="$UM2"; then
 	wait_log 'probe run state' 4 || true
 	wait_log 'denied done' 4 || true
 	for pattern in \
-		'probe id api-probe apiVersion 1.2' \
+		'probe id api-probe apiVersion 1.3' \
 		'probe theme background #' \
 		'probe style spacing.md 12' \
 		'probe settings.greeting hi' \
@@ -534,7 +542,7 @@ if start_shell LUMEN_USER_MODULES_DIR="$UM5"; then
 
 	check "bad JSON is reported with a dir: id" grep -q 'module:dir:err-bad-json","msg":"invalid: .*JSON' "$TMP/shell.log"
 	check "missing main file is reported with the module id" grep -q 'module:err-missing-main","msg":"invalid: main' "$TMP/shell.log"
-	check "newer interface is reported with both versions" grep -q 'module:err-newer-minor","msg":"invalid: api: requires interface 1.9, Lumen provides 1.2' "$TMP/shell.log"
+	check "newer interface is reported with both versions" grep -q 'module:err-newer-minor","msg":"invalid: api: requires interface 1.9, Lumen provides 1.3' "$TMP/shell.log"
 	check "duplicate id is reported with both directories" bash -c "grep 'invalid: id: duplicate' '$TMP/shell.log' | grep -q 'dup-a' "
 	check "odd directory name is shown as dir:bad_name_" grep -q 'module:dir:bad_name_' "$TMP/shell.log"
 	check "QML syntax error is reported with the module id" grep -q 'module:qml-syntax-error","msg":"failed: ' "$TMP/shell.log"
@@ -1243,6 +1251,103 @@ stop_shell
 
 }
 
+# ---- 18. Prism, the search window (specs/005-prism-window, quickstart sections 2 to 4, 9 and 10) ----
+# What needs a person and is not checked here: that the keyboard really returns to the window you
+# were in (type into it after a close), the placement by eye at a fractional display scale, input
+# method composition, the response-time target (SC-001: a screen recording, quickstart section 3),
+# and the typing and frame-rate targets (SC-006, SC-009: quickstart section 7).
+prism_layers() { niri msg layers 2>/dev/null | grep -c 'Namespace: "lumen-prism"$'; }
+prism_wait() { # prism_wait N seconds: wait until N Prism surfaces exist
+	local i
+	for i in $(seq 1 $(($2 * 20))); do
+		if [ "$(prism_layers)" -eq "$1" ]; then return 0; fi
+		sleep 0.05
+	done
+	return 1
+}
+prism_keyboard() { niri msg layers 2>/dev/null | awk '/Namespace: "lumen-prism"$/{want=1;next} want&&/Keyboard interactivity/{print $NF; want=0}' | head -1; }
+section_18() {
+echo "18. Prism"
+UMX="$TMP/user-modules-prism"
+rm -rf "$UMX"
+mkdir -p "$UMX"
+cp -r "$ROOT/examples/hello-prism-source" "$UMX/"
+apply_config '{"log":{"level":"debug"},"modules":{"hello-prism-source":{"enabled":true}}}'
+if start_shell LUMEN_USER_MODULES_DIR="$UMX"; then
+	wait_log 'module:prism","msg":"prism loaded' 5 || true
+	SHOW=$("$LUMEN" modules show prism 2>&1)
+	check "Prism loads with no settings error" grep -q 'state: loaded' <<<"$SHOW"
+	check "Prism declares its four commands" bash -c 'grep -Ecx "  (toggle|open|close|clear)" <<<"$1" | grep -qx 4' _ "$SHOW"
+	[ "$(prism_layers)" -eq 0 ] && ok "no Prism surface exists at load" || bad "a Prism surface exists at load"
+
+	# The commands (quickstart section 3).
+	[ "$("$LUMEN" modules call prism toggle 2>&1)" = "opened" ] && ok "toggle opens the window" || bad "toggle did not answer opened"
+	prism_wait 1 3 && ok "the window is one overlay surface" || bad "the window is not one surface (found $(prism_layers))"
+	[ "$(prism_keyboard)" = "exclusive" ] && ok "the window takes the keyboard when its command opens it" || bad "the window's keyboard interactivity is $(prism_keyboard)"
+	"$LUMEN" modules call prism open >/dev/null 2>&1
+	sleep 0.5
+	prism_wait 1 3 && ok "open while open re-creates it: still one surface" || bad "open while open left $(prism_layers) surfaces"
+	[ "$("$LUMEN" modules call prism clear 2>&1)" = "cleared" ] && ok "clear answers cleared" || bad "clear did not answer cleared"
+	[ "$("$LUMEN" modules call prism toggle 2>&1)" = "closed" ] && ok "toggle closes the window" || bad "toggle did not answer closed"
+	prism_wait 0 3 && ok "closing leaves no surface behind" || bad "a surface is left after close ($(prism_layers))"
+	[ "$("$LUMEN" modules call prism close 2>&1)" = "already closed" ] && ok "close while closed says so" || bad "close while closed"
+	# Two commands in a row end in the state of the last one.
+	"$LUMEN" modules call prism open >/dev/null 2>&1
+	"$LUMEN" modules call prism close >/dev/null 2>&1
+	"$LUMEN" modules call prism open >/dev/null 2>&1
+	"$LUMEN" modules call prism toggle >/dev/null 2>&1
+	prism_wait 0 3 && ok "open, close, open, toggle in a row ends closed" || bad "quick commands left $(prism_layers) surfaces"
+
+	# The nine anchors (quickstart section 4): each one opens a surface and closes it again.
+	for anchor in top-left top top-right left center right bottom-left bottom bottom-right; do
+		apply_config "{\"log\":{\"level\":\"debug\"},\"modules\":{\"hello-prism-source\":{\"enabled\":true},\"prism\":{\"anchor\":\"$anchor\"}}}"
+		"$LUMEN" modules call prism open >/dev/null 2>&1
+		if prism_wait 1 3; then ok "anchor $anchor: the window opens"; else bad "anchor $anchor: no window (found $(prism_layers))"; fi
+		"$LUMEN" modules call prism close >/dev/null 2>&1
+		prism_wait 0 3 || bad "anchor $anchor: the window did not close"
+	done
+
+	# A source supplies rows, and a source that goes away loses only its rows (quickstart section 8).
+	SHOW=$("$LUMEN" modules show prism 2>&1)
+	check "the example source is a shown contribution to prism/sources" grep -Eq 'hello-prism-source/echo +hello-prism-source +shown' <<<"$SHOW"
+	apply_config '{"log":{"level":"debug"},"modules":{"prism":{"preview":true}}}'
+	"$LUMEN" modules call prism open >/dev/null 2>&1
+	prism_wait 1 3 && ok "preview mode opens" || bad "preview mode did not open"
+	"$LUMEN" modules call prism close >/dev/null 2>&1
+	prism_wait 0 3 || true
+
+	# Wrong values: the window still opens and each wrong key is named (quickstart section 10).
+	apply_config '{"log":{"level":"debug"},"modules":{"prism":{"anchor":"middle","width":5,"windowRole":"nope","prefixWeb":"@","maxRows":"many","radius":-3,"animation":"spin","fontSize":0,"borderOpacity":7,"inputPosition":"side"}}}'
+	SHOW=$("$LUMEN" modules show prism 2>&1)
+	for key in anchor width windowRole prefixWeb maxRows radius animation fontSize borderOpacity inputPosition; do
+		check "a wrong $key is reported with its key" grep -Eq "^  $key: must be " <<<"$SHOW"
+	done
+	"$LUMEN" modules call prism open >/dev/null 2>&1
+	prism_wait 1 3 && ok "the window opens with ten wrong settings" || bad "the window did not open with wrong settings"
+	"$LUMEN" modules call prism close >/dev/null 2>&1
+	prism_wait 0 3 || true
+
+	# Disabling the module leaves nothing behind.
+	"$LUMEN" modules call prism open >/dev/null 2>&1
+	prism_wait 1 3 || true
+	apply_config '{"log":{"level":"debug"},"modules":{"prism":{"enabled":false}}}'
+	prism_wait 0 5 && ok "disabling Prism while it is open removes its surface" || bad "a surface is left after disabling ($(prism_layers))"
+	OUT=$("$LUMEN" modules call prism toggle 2>&1 || true)
+	[[ "$OUT" == *"not running"* || "$OUT" == *"not loaded"* || "$OUT" == *"disabled"* ]] && ok "a command to a disabled Prism says it is not running" || bad "a command to a disabled Prism answered: $OUT"
+	"$LUMEN" version >/dev/null 2>&1 && ok "the shell keeps running" || bad "the shell keeps running"
+	ERRS=$(grep -E 'TypeError|ReferenceError|Unable to assign|Binding loop|runtime error' "$TMP/shell.log" | head -3 | cut -c1-300)
+	if [ -z "$ERRS" ]; then ok "no QML errors or binding loops"; else
+		bad "no QML errors or binding loops"
+		echo "$ERRS"
+	fi
+else
+	bad "shell did not start for the Prism checks"
+	cat "$TMP/shell.log"
+fi
+stop_shell
+
+}
+
 # The sections run in this order (the ids of --list); the resource checks below follow.
 for id in $ALL_SECTIONS; do
 	if section_selected "$id"; then "section_$id"; fi
@@ -1274,6 +1379,35 @@ if [ "$CYCLES" -gt 0 ] && section_selected 8; then
 		fi
 	else
 		bad "shell did not start for the module cycle check"
+	fi
+	stop_shell
+fi
+
+# ---- 18c. Prism: memory over repeated opens and closes (quickstart section 10) ----
+if [ "$PRISM_CYCLES" -gt 0 ] && section_selected 18c; then
+	echo "18c. $PRISM_CYCLES Prism open and close cycles"
+	apply_config '{"modules":{"prism":{"preview":true}}}'
+	if start_shell; then
+		wait_log 'module:prism","msg":"prism loaded' 5 || true
+		first=""
+		for i in $(seq 1 "$PRISM_CYCLES"); do
+			"$LUMEN" modules call prism open >/dev/null 2>&1
+			prism_wait 1 3 || { bad "cycle $i: the window did not open"; break; }
+			"$LUMEN" modules call prism close >/dev/null 2>&1
+			prism_wait 0 3 || { bad "cycle $i: the window did not close"; break; }
+			if [ "$i" -eq 1 ]; then
+				sleep 0.5
+				first=$(rss_of)
+			fi
+		done
+		sleep 1
+		last=$(rss_of)
+		[ "$(prism_layers)" -eq 0 ] && ok "no Prism surface is left after $PRISM_CYCLES cycles" || bad "a Prism surface is left after the cycles"
+		if [ -n "$first" ]; then
+			growth_check "prism: $PRISM_CYCLES open and close cycles, memory" "$first" "$last" 12
+		fi
+	else
+		bad "shell did not start for the Prism cycle check"
 	fi
 	stop_shell
 fi

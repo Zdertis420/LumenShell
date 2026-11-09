@@ -1,0 +1,14 @@
+{
+  "id": "hello-prism-source",
+  "name": "Hello Prism source",
+  "version": "1.0.0",
+  "api": "1.3",
+  "description": "A source for the Prism search window: three rows built from what the user types. Copy this directory to write your own.",
+  "permissions": ["contribute:prism"],
+  "contributions": [
+    {"id": "echo", "name": "Echo", "target": {"module": "prism", "point": "sources"}, "file": "Source.qml"}
+  ],
+  "settings": {
+    "rows": {"type": "integer", "default": 3, "min": 1, "max": 1000, "description": "How many rows to supply for any text (an example of a setting of a source)"}
+  }
+}

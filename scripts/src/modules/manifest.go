@@ -14,7 +14,7 @@ import (
 // Limits from specs/002-modules/contracts/module-manifest.md.
 const (
 	maxManifestBytes = 64 * 1024
-	maxSettings      = 64
+	maxSettings      = 128 // interface 1.3 (specs/005-prism-window): was 64
 	maxPermissions   = 16
 	maxHelpers       = 8
 	// Interface 1.1 (specs/003-bar/contracts/module-manifest-1.1.md).

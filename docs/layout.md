@@ -6,6 +6,8 @@
 | A shell component (bar, launcher, notifications, ...) | `modules/<name>/` with a `module.json` and a `Main.qml`. It must use only the module interface (`api`), see [module-api.md](module-api.md) |
 | An item for the bar | A module with a contribution to `bar/items` (a `module.json` with `contributions` and an `Item.qml`); bundled ones are `modules/bar-<name>/`. See [bar.md](bar.md) and `examples/hello-bar-item/` |
 | How the bar is drawn or placed | `modules/bar/`: `BarWindow.qml` (the panel, the strip and the islands), `FrameBorders.qml` (the frame's border panels and rounded corners), `geometry.js` (sizes and limits), `layout.js` (the fitting rule along the bar), `popup.js` (popup placement). The pure `.js` files have QML unit tests in `scripts/tests/bar_*_test.qml` |
+| How the Prism search window is drawn or placed | `modules/prism/`: `PrismWindow.qml` (the surface, panel, input, results and footer), `ResultRow.qml` (one row), `geometry.js` (sizes, the nine placements, fonts, contrast), `prefix.js` (the `@x` prefix) and `sample.js` (preview rows). The pure `.js` files have QML unit tests in `scripts/tests/prism_*_test.qml`. See [prism.md](prism.md) |
+| Something that supplies rows to Prism | A module with a contribution to `prism/sources` (see `examples/hello-prism-source/` and [prism.md](prism.md#sources)) |
 | A module you write for yourself or to share | `~/.local/share/lumen/modules/<name>/` (or `LUMEN_USER_MODULES_DIR`); see [writing-a-module.md](writing-a-module.md) |
 | An example module for documentation | `examples/<name>/` |
 | The manifest schema | `data/schema/module.schema.json`, kept in step with `scripts/src/modules/manifest.go` by a test |

@@ -24,7 +24,8 @@ Singleton {
     // The module interface version Lumen provides (major.minor). 1.1 added extension points,
     // contributions, module commands, and the stringlist setting type (specs/003-bar). 1.2 added
     // unset settings (a null default) and the bar's placement facts (specs/004-bar-customization-styles).
-    readonly property string apiVersion: "1.2"
+    // 1.3 raised the limit of settings per module from 64 to 128 (specs/005-prism-window).
+    readonly property string apiVersion: "1.3"
     // Module records (plain objects, see specs/002-modules/data-model.md). Replaced as a
     // whole on every change, so bindings update.
     property var list: []

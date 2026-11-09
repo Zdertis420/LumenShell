@@ -1,4 +1,4 @@
-# Module interface reference (version 1.2)
+# Module interface reference (version 1.3)
 
 Everything a module is meant to use. The bundled modules use exactly this and nothing more; a test checks it (`scripts/tests/module_api_usage_test.go`). The formal contract is `specs/002-modules/contracts/module-api.md`; the manifest is described in `specs/002-modules/contracts/module-manifest.md`. For a walkthrough, read [writing-a-module.md](writing-a-module.md).
 
@@ -26,7 +26,7 @@ When the module is unloaded (disabled, reloaded, or on shutdown), this object an
 | Member | Needs permission | Description |
 |--------|------------------|-------------|
 | `api.id`, `api.name`, `api.version` | none | From the manifest |
-| `api.apiVersion` | none | The interface version Lumen provides, `"1.2"` |
+| `api.apiVersion` | none | The interface version Lumen provides, `"1.3"` |
 | `api.theme` | none | The 16 color roles (`primary`, `onPrimary`, `surface`, ...), plus `mode`, `paletteId`, `status`, `reason`. Colors follow theme changes live; bind to them, never copy hex values |
 | `api.style` | none | Design tokens: `spacing`, `radius`, `font`, `motion`, `border` (`api.style.border.thin` is the hairline of outlines and focus rings) |
 | `api.log` | none | `debug(msg, fields)`, `info`, `warn`, `error`. Entries carry the source `module:<id>` |
@@ -143,6 +143,8 @@ The interface version is `major.minor`. A module loads if its `api` major number
 What changed:
 What to do:
 ```
+
+No migrations: version 1.3 only raised a limit: a module may declare up to 128 settings (it was 64). A module that declares more than 64 settings must declare `"api": "1.3"`; a 1.2 shell refuses it with the required and available versions. The Prism search window ([prism.md](prism.md)) is the first module that needs it, and takes its rows from other modules through its own extension point, `prism/sources`, with no new `api` member.
 
 No migrations: version 1.2 only added things (the unset default `"default": null`, and new members of the bar's slot: `vertical`, `maxLength`, `font`, `itemPadding`, `itemRadius`, `textRole` and `focusRole`, documented in [bar.md](bar.md)), so it is additive and no module needs to change. A module that reads one of them declares `"api": "1.2"`; a 1.1 shell refuses it with the required and available versions.
 

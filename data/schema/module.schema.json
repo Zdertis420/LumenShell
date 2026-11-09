@@ -47,7 +47,7 @@
     },
     "settings": {
       "type": "object",
-      "maxProperties": 64,
+      "maxProperties": 128,
       "propertyNames": {
         "pattern": "^[a-z][A-Za-z0-9]{0,31}$"
       },

@@ -56,6 +56,14 @@ The bar can sit on any of the four edges and has three styles: `solid` (one stri
 
 A broken module only breaks itself: it is listed as `failed` with the reason. Modules run inside the shell with its privileges; permissions are shown, not a sandbox. To write one, follow [docs/writing-a-module.md](docs/writing-a-module.md) and copy `examples/hello-module/`. The interface is described in [docs/module-api.md](docs/module-api.md).
 
+## Prism
+
+Prism is a Spotlight-like search window. This version is the window only: bind `lumen modules call prism toggle` to a key in your compositor, and a rounded input with a results list opens (it takes the keyboard while it is open and gives it back on close; Escape closes it). It can sit at any of nine places on the screen, takes every color from theme roles, and has a mode prefix (`@a` apps, `@f` files, `@w` web, `@s` commands, `@g` grep) that later features will use. Other modules supply the rows. See [docs/prism.md](docs/prism.md) for the commands, the settings and how to write a source.
+
+```json
+{"modules": {"prism": {"anchor": "center", "width": 720, "radius": 24, "backdrop": true}}}
+```
+
 ## Commands
 
 | Command | What it does |
@@ -72,8 +80,8 @@ A broken module only breaks itself: it is listed as `failed` with the reason. Mo
 ```text
 shell.qml          Quickshell entry point (qs -p .)
 singletons/        Config, Theme, Style, Backend, Log, Modules (QML singletons)
-modules/           Bundled modules: bar, bar-clock, bar-sound, bar-battery, test-surface
-examples/          Example module to copy (hello-module)
+modules/           Bundled modules: bar, bar-clock, bar-sound, bar-battery, prism, test-surface
+examples/          Example modules to copy (hello-module, hello-bar-item, hello-prism-source)
 data/              Presets, fallback palette, config and manifest schemas
 scripts/
 ├── src/           One directory per Go program (lumen, config, palette, modules)

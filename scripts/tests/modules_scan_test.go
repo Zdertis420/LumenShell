@@ -327,7 +327,7 @@ func TestScanLimits(t *testing.T) {
 	writeModule(t, user, "huge", huge)
 
 	var settings []string
-	for i := 0; i < 65; i++ {
+	for i := 0; i < 129; i++ { // interface 1.3 allows 128 settings per module
 		settings = append(settings, fmt.Sprintf(`"s%c%c":{"type":"boolean","default":false}`, 'a'+rune(i/26), 'a'+rune(i%26)))
 	}
 	writeModule(t, user, "many-settings", `{"id":"many-settings","name":"m","version":"1.0.0","api":"1.0","settings":{`+strings.Join(settings, ",")+`}}`)
@@ -345,7 +345,7 @@ func TestScanLimits(t *testing.T) {
 	if m := got["dir:huge"]; m.Valid || !hasProblem(m.Errors, "", "64 KiB") {
 		t.Errorf("huge: %+v", m)
 	}
-	if m := got["many-settings"]; m.Valid || !hasProblem(m.Errors, "settings", "64") {
+	if m := got["many-settings"]; m.Valid || !hasProblem(m.Errors, "settings", "128") {
 		t.Errorf("many-settings: %+v", m)
 	}
 	if m := got["many-permissions"]; m.Valid || !hasProblem(m.Errors, "permissions", "16") {

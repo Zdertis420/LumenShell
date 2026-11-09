@@ -168,6 +168,10 @@ Since module interface 1.1 a module can add an item to another module's extensio
 
 An item that fails to load, or logs three errors in the first five seconds, is unloaded and marked failed like any module; the bar and the other items keep working. Reload it with `lumen modules reload <id>` after fixing it. See [bar.md](bar.md) for the bar's settings, and [module-api.md](module-api.md) for the interface.
 
+## 8b. Supplying rows to Prism
+
+The Prism search window ([prism.md](prism.md)) declares the extension point `prism/sources`. A module that supplies rows to it contributes in the same way as a bar item, with the permission `contribute:prism`; its file is an invisible `Item` that reads `slot.mode` and `slot.query`, calls `slot.setRows(rows)` and reacts to `chosen(id)`. Copy `examples/hello-prism-source/`; the members of the slot and the limits are in [prism.md](prism.md#sources). The rest (enabling the module, `lumen modules show prism` for its state) is as in section 8. A module may declare up to 128 settings since interface 1.3 (64 before): declare `"api": "1.3"` if you need more than 64.
+
 ## 9. The trust model
 
 A module is code that runs inside your shell. Permissions control what the `api` object does for it, and `lumen modules` shows them before you enable anything, but they are not a sandbox. Do not enable modules you do not trust.
