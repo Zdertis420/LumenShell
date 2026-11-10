@@ -344,7 +344,7 @@ function blend(fg, bg, alpha) {
 }
 
 // The pairs that must reach AA (data-model.md "Contrast pairs"): [text key, background key].
-var PAIRS = [["inputTextRole", "inputRole"], ["placeholderRole", "inputRole"], ["titleRole", "windowRole"], ["subtitleRole", "windowRole"], ["hintRole", "windowRole"], ["selectedTextRole", "selectedRole"], ["footerRole", "windowRole"], ["emptyRole", "windowRole"]];
+var PAIRS = [["inputTextRole", "inputRole"], ["placeholderRole", "inputRole"], ["titleRole", "windowRole"], ["subtitleRole", "windowRole"], ["hintRole", "windowRole"], ["selectedTextRole", "selectedRole"], ["footerRole", "windowRole"], ["emptyRole", "windowRole"], ["matchRole", "windowRole"], ["messageRole", "windowRole"], ["errorRole", "windowRole"]];
 
 // Checks the pairs. `c` has the base color of every role key of PAIRS ({r, g, b}) and the
 // opacities `windowOpacity`, `inputOpacity` and `selectedOpacity`. The window background is
@@ -357,6 +357,8 @@ function contrastWarnings(c) {
         var textKey = PAIRS[i][0];
         var bgKey = PAIRS[i][1];
         var bg = c[bgKey];
+        if (c[textKey] === undefined || bg === undefined)
+            continue;
         if (bgKey === "inputRole")
             bg = blend(c.inputRole, windowBg, orDefault(c.inputOpacity, 1));
         else if (bgKey === "selectedRole")

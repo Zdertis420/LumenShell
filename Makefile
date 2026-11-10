@@ -1,4 +1,7 @@
 PROGRAMS := lumen config palette modules
+# Programs that a bundled module runs as its own helper: built into the module's bin folder
+# (the module interface runs only helpers inside the module directory).
+MODULE_PROGRAMS := search:modules/prism-search/bin
 BIN := scripts/bin
 GO_SRC := $(wildcard scripts/src/*/*.go)
 QML := $(shell find . -name '*.qml' -not -path './.claude/*' -not -path './.specify/*' -not -path './scripts/tests/fixtures/*')
@@ -9,6 +12,10 @@ build:
 	@mkdir -p $(BIN)
 	@for p in $(PROGRAMS); do \
 		go build -o $(BIN)/$$p $$(ls scripts/src/$$p/*.go) || exit 1; \
+	done
+	@for m in $(MODULE_PROGRAMS); do \
+		p=$${m%%:*}; dir=$${m#*:}; mkdir -p $$dir; \
+		go build -o $$dir/$$p $$(ls scripts/src/$$p/*.go) || exit 1; \
 	done
 
 run: build
@@ -22,6 +29,9 @@ lint:
 	@out=$$(gofmt -l scripts/src scripts/tests); test -z "$$out" || { echo "gofmt needed:"; echo "$$out"; exit 1; }
 	@for p in $(PROGRAMS); do \
 		go vet $$(ls scripts/src/$$p/*.go) || exit 1; \
+	done
+	@for m in $(MODULE_PROGRAMS); do \
+		go vet $$(ls scripts/src/$${m%%:*}/*.go) || exit 1; \
 	done
 	@test -z "$(QML)" || qmllint $(QML)
 
@@ -37,7 +47,7 @@ test: build
 QMLTEST := $(or $(wildcard /usr/lib/qt6/bin/qmltestrunner),$(shell command -v qmltestrunner6 2>/dev/null),qmltestrunner)
 
 qmltest:
-	@files=$$(ls scripts/tests/bar_*_test.qml scripts/tests/prism_*_test.qml 2>/dev/null); \
+	@files=$$(ls scripts/tests/bar_*_test.qml scripts/tests/prism_*_test.qml scripts/tests/search_*_test.qml 2>/dev/null); \
 	if [ -z "$$files" ]; then exit 0; fi; \
 	command -v $(QMLTEST) >/dev/null || { echo "qmltestrunner (Qt 6) not found"; exit 1; }; \
 	for f in $$files; do QT_QPA_PLATFORM=offscreen $(QMLTEST) -input $$f || exit 1; done
@@ -52,3 +62,4 @@ perf: build
 
 clean:
 	rm -rf $(BIN)
+	@for m in $(MODULE_PROGRAMS); do rm -f $${m#*:}/$${m%%:*}; done

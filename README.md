@@ -58,7 +58,7 @@ A broken module only breaks itself: it is listed as `failed` with the reason. Mo
 
 ## Prism
 
-Prism is a Spotlight-like search window. This version is the window only: bind `lumen modules call prism toggle` to a key in your compositor, and a rounded input with a results list opens (it takes the keyboard while it is open and gives it back on close; Escape closes it). It can sit at any of nine places on the screen, takes every color from theme roles, and has a mode prefix (`@a` apps, `@f` files, `@w` web, `@s` commands, `@g` grep) that later features will use. Other modules supply the rows. See [docs/prism.md](docs/prism.md) for the commands, the settings and how to write a source.
+Prism is a Spotlight-like search window. Bind `lumen modules call prism toggle` to a key in your compositor, and a rounded input with a results list opens (it takes the keyboard while it is open and gives it back on close; Escape closes it). It can sit at any of nine places on the screen and takes every color from theme roles. A prefix picks the mode: `@a` apps (Enter launches), `@f` files (opened in `$EDITOR`; `@f name ~/dir` searches one folder), `@s` commands (listed, never run), `@g` grep (`@g pattern file...`, opened at the line), `@w` web (opens `$BROWSER`), and with no prefix apps first, then files, then a web search suggestion. `EDITOR`, `TERMINAL` and `BROWSER` must be set in the environment that starts the shell (a `.bashrc` is not read; for niri use an `environment { }` block). See [docs/prism.md](docs/prism.md) for the commands, the modes, the settings and how to write a source.
 
 ```json
 {"modules": {"prism": {"anchor": "center", "width": 720, "radius": 24, "backdrop": true}}}
@@ -80,11 +80,11 @@ Prism is a Spotlight-like search window. This version is the window only: bind `
 ```text
 shell.qml          Quickshell entry point (qs -p .)
 singletons/        Config, Theme, Style, Backend, Log, Modules (QML singletons)
-modules/           Bundled modules: bar, bar-clock, bar-sound, bar-battery, prism, test-surface
+modules/           Bundled modules: bar, bar-clock, bar-sound, bar-battery, prism, prism-search, test-surface
 examples/          Example modules to copy (hello-module, hello-bar-item, hello-prism-source)
 data/              Presets, fallback palette, config and manifest schemas
 scripts/
-├── src/           One directory per Go program (lumen, config, palette, modules)
+├── src/           One directory per Go program (lumen, config, palette, modules, search)
 ├── bin/           Build output (git-ignored)
 └── tests/         Black-box tests, smoke test, fixtures
 docs/              Layout, dependencies, development notes

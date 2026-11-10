@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import "geometry.js" as Geometry
 import "prefix.js" as Prefix
+import "rows.js" as Rows
 import "sample.js" as Sample
 
 // The Prism module: a Spotlight-like search window (specs/005-prism-window). This is the
@@ -31,9 +32,7 @@ Scope {
     readonly property var installedFamilies: Qt.fontFamilies()
     readonly property var fontResult: Geometry.fonts(settings, tokens, installedFamilies)
     readonly property var letterResult: Prefix.checkLetters(settings)
-    readonly property int rowLimit: 1000 // documented constant: rows a source may supply
-    readonly property int textLimit: 200 // documented constant: characters of a title, subtitle or hint
-    readonly property int idLimit: 200 // documented constant: characters of a row id
+    readonly property int rowLimit: Rows.ROW_LIMIT
     readonly property var colors: ({
         "window": paint("windowRole", "windowOpacity"),
         "border": paint("borderRole", "borderOpacity"),
@@ -50,6 +49,9 @@ Scope {
         "separator": paint("separatorRole", ""),
         "footer": paint("footerRole", ""),
         "empty": paint("emptyRole", ""),
+        "match": paint("matchRole", ""),
+        "message": paint("messageRole", ""),
+        "error": paint("errorRole", ""),
         "shadow": paint("shadowRole", "shadowOpacity"),
         "backdrop": paint("backdropRole", "backdropOpacity")
     })
@@ -85,6 +87,9 @@ Scope {
         "selectedTextRole": baseColor("selectedTextRole"),
         "footerRole": baseColor("footerRole"),
         "emptyRole": baseColor("emptyRole"),
+        "matchRole": baseColor("matchRole"),
+        "messageRole": baseColor("messageRole"),
+        "errorRole": baseColor("errorRole"),
         "inputOpacity": settings.inputOpacity ?? 1,
         "selectedOpacity": settings.selectedOpacity ?? 1
     })
@@ -117,6 +122,13 @@ Scope {
     readonly property string query: parsed.query
     readonly property int prefixLength: parsed.prefixLength
     property int selectedIndex: -1
+    // Whether the user moved the selection since the text last changed (reported by the window).
+    property bool navigated: false
+    // Where a source wants the text cursor after setText (Prism 1.2.0); see the window.
+    property var cursorRequest: ({
+        "pos": -1,
+        "n": 0
+    })
     // ---- sources and rows ----
     property var sources: ({
     })
@@ -125,15 +137,25 @@ Scope {
     })
     // contribution key -> validated rows
     readonly property var contribs: api.extensions.contributions("sources")
-    readonly property var supplied: {
-        const out = [];
-        for (const c of contribs) {
-            const rows = sourceRows[c.key];
-            if (rows)
-                for (const r of rows) out.push(r);
+    readonly property var supplied: combine(sourceRows)
+    // Which row to select when the rows change next (see setSourceRows).
+    property int pendingIndex: 0
+    // contribution key -> {text, kind, seq}: the message each source set (Prism 1.1.0)
+    property var messages: ({
+    })
+    property int messageSeq: 0
+    readonly property var message: {
+        let best = null;
+        for (const key of Object.keys(messages)) {
+            const m = messages[key];
+            if (m.text !== "" && (best === null || m.seq > best.seq))
+                best = m;
 
         }
-        return out;
+        return best === null ? {
+            "text": "",
+            "kind": "info"
+        } : best;
     }
     readonly property var rows: settings.preview === true ? Sample.filter(Sample.ROWS, query) : supplied
     readonly property var selectedRow: selectedIndex >= 0 && selectedIndex < rows.length ? rows[selectedIndex] : null
@@ -163,77 +185,33 @@ Scope {
         return Qt.alpha(root.baseColor(roleKey), opacityKey === "" ? 1 : (root.settings[opacityKey] ?? 1));
     }
 
-    function clip(value) : string {
-        return String(value).slice(0, root.textLimit);
-    }
+    // The rows of all sources, in the order of the contributions.
+    function combine(map) : variant {
+        const out = [];
+        for (const c of root.contribs) {
+            const rows = map[c.key];
+            if (rows)
+                for (const r of rows) out.push(r);
 
-    // Checks the rows a source supplied. Returns {rows, warnings}; a row that breaks the rules
-    // is dropped with a warning that names the source.
-    function validateRows(key: string, list) : variant {
-        const out = {
-            "rows": [],
-            "warnings": []
-        };
-        const warn = (index, entry, problem) => {
-            out.warnings.push({
-                "place": key,
-                "index": index,
-                "entry": entry === null || entry === undefined ? null : {
-                    "id": entry.id
-                },
-                "problem": problem
-            });
-        };
-        if (!Array.isArray(list)) {
-            warn(0, null, "setRows needs a list of rows; ignored");
-            return out;
-        }
-        const seen = {
-        };
-        for (let i = 0; i < list.length; i++) {
-            const r = list[i];
-            if (out.rows.length >= root.rowLimit) {
-                warn(i, null, "more than " + root.rowLimit + " rows; the rest are dropped");
-                break;
-            }
-            if (r === null || typeof r !== "object") {
-                warn(i, null, "a row must be an object; dropped");
-                continue;
-            }
-            if (typeof r.id !== "string" || r.id === "" || r.id.length > root.idLimit) {
-                warn(i, r, "a row needs an id of 1 to " + root.idLimit + " characters; dropped");
-                continue;
-            }
-            if (typeof r.title !== "string" || r.title === "") {
-                warn(i, r, "a row needs a title; dropped");
-                continue;
-            }
-            if (seen[r.id]) {
-                warn(i, r, "duplicate id; dropped");
-                continue;
-            }
-            seen[r.id] = true;
-            out.rows.push({
-                "id": r.id,
-                "title": root.clip(r.title),
-                "subtitle": r.subtitle === undefined || r.subtitle === null ? "" : root.clip(r.subtitle),
-                "hint": r.hint === undefined || r.hint === null ? "" : root.clip(r.hint),
-                "icon": typeof r.icon === "string" ? r.icon : "",
-                "source": key
-            });
         }
         return out;
     }
 
-    function setSourceRows(key: string, list) {
+    // Sets the rows of one source. With keep (Prism 1.1.0) the selected row stays selected if
+    // it is still there, but only after the user moved the selection; until then, and without
+    // keep, the first row is selected, as in Feature V.
+    function setSourceRows(key: string, list, keep) {
         if (!root.sources[key])
             return ;
 
-        const checked = root.validateRows(key, list);
+        const checked = Rows.validateRows(key, list);
         const rows = Object.assign({
         }, root.sourceRows);
         rows[key] = checked.rows;
+        // Decide the selection before the rows change: the window reacts to the change at once.
+        root.pendingIndex = Rows.selectionAfter(root.rows, root.selectedIndex, root.settings.preview === true ? root.rows : root.combine(rows), keep === true && root.navigated);
         root.sourceRows = rows;
+        root.pendingIndex = 0;
         const warnings = Object.assign({
         }, root.sourceWarnings);
         if (checked.warnings.length > 0)
@@ -300,6 +278,35 @@ Scope {
         }, root.sourceWarnings);
         delete warnings[key];
         root.sourceWarnings = warnings;
+        const messages = Object.assign({
+        }, root.messages);
+        delete messages[key];
+        root.messages = messages;
+    }
+
+    // Sets the message line of one source (Prism 1.1.0). An empty text clears it.
+    function setSourceMessage(key: string, text, kind) {
+        if (!root.sources[key])
+            return ;
+
+        const checked = Rows.checkMessage(text, kind);
+        const messages = Object.assign({
+        }, root.messages);
+        root.messageSeq += 1;
+        messages[key] = {
+            "text": checked.text,
+            "kind": checked.kind,
+            "seq": root.messageSeq
+        };
+        root.messages = messages;
+    }
+
+    // Messages belong to one query: they are cleared when the text changes.
+    function resetMessages() {
+        if (Object.keys(root.messages).length > 0)
+            root.messages = ({
+        });
+
     }
 
     // Tells the source that supplied the chosen row (and nobody else). Sample rows have no
@@ -313,6 +320,30 @@ Scope {
         if (entry)
             entry.slot.chosen(row.id);
 
+    }
+
+    // Tab (Prism 1.2.0): every source may complete the text; Prism does nothing else.
+    function requestComplete() {
+        for (const key of Object.keys(root.sources)) {
+            const entry = root.sources[key];
+            if (entry && entry.slot)
+                entry.slot.completeRequested();
+
+        }
+    }
+
+    // A source set the text (answer to Tab): like typing, plus where the cursor goes.
+    function setTextFromSource(value, cursor) {
+        if (typeof value !== "string") {
+            api.log.warn("a source gave setText something that is not a string");
+            return ;
+        }
+        root.setText(value);
+        const pos = typeof cursor === "number" && isFinite(cursor) ? Math.max(0, Math.min(value.length, Math.floor(cursor))) : value.length;
+        root.cursorRequest = {
+            "pos": pos,
+            "n": root.cursorRequest.n + 1
+        };
     }
 
     // ---- commands (contracts/prism-surface.md) ----
@@ -332,9 +363,10 @@ Scope {
             });
             return "opened";
         }
-        if (root.settings.keepText !== true)
+        if (root.settings.keepText !== true) {
+            root.resetMessages();
             root.text = "";
-
+        }
         root.shown = true;
         root.windowActive = true;
         return "opened";
@@ -354,11 +386,14 @@ Scope {
     }
 
     function clear() : string {
+        root.resetMessages();
         root.text = "";
         return "cleared";
     }
 
     function setText(value: string) {
+        root.resetMessages();
+        root.navigated = false;
         root.text = value;
     }
 
@@ -448,9 +483,19 @@ Scope {
             readonly property int rowLimit: host.rowLimit
 
             signal chosen(string id)
+            // Tab was pressed (Prism 1.2.0).
+            signal completeRequested()
 
-            function setRows(rows) {
-                host.setSourceRows(key, rows);
+            function setText(text, cursor) {
+                host.setTextFromSource(text, cursor);
+            }
+
+            function setRows(rows, keepSelection) {
+                host.setSourceRows(key, rows, keepSelection === true);
+            }
+
+            function setMessage(text, kind) {
+                host.setSourceMessage(key, text, kind);
             }
 
             function close() {
@@ -478,6 +523,9 @@ Scope {
             text: root.text
             shown: root.shown
             prefixLength: root.prefixLength
+            message: root.message.text
+            messageKind: root.message.kind
+            pendingIndex: root.pendingIndex
             wantedScreen: root.wantedScreen()
             onCloseRequested: root.close()
             onTextEdited: (value) => {
@@ -486,6 +534,9 @@ Scope {
             onSelected: (index) => {
                 root.selectedIndex = index;
             }
+            onNavigatedChanged: root.navigated = navigated
+            onCompleteRequested: root.requestComplete()
+            cursorRequest: root.cursorRequest
             onRowChosen: (index) => {
                 return root.chooseRow(index);
             }
@@ -493,6 +544,7 @@ Scope {
             onHidden: {
                 root.windowActive = false;
                 root.selectedIndex = -1;
+                root.navigated = false;
                 root.setWindowWarnings([]);
             }
         }

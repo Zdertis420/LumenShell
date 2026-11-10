@@ -33,7 +33,7 @@ STYLE_CYCLES=0
 CPU_SECONDS=0
 VERBOSE=0
 SECTIONS=""
-ALL_SECTIONS="1 2 3 4 5 6 6b 7 7c 10 11 12 13 14 16 17 18"
+ALL_SECTIONS="1 2 3 4 5 6 6b 7 7c 10 11 12 13 14 16 17 18 19"
 PRISM_CYCLES=0
 MODFIX=$FIXTURES/modules
 while [ $# -gt 0 ]; do
@@ -1342,6 +1342,224 @@ if start_shell LUMEN_USER_MODULES_DIR="$UMX"; then
 	fi
 else
 	bad "shell did not start for the Prism checks"
+	cat "$TMP/shell.log"
+fi
+stop_shell
+
+}
+
+# ---- 19. Prism search modes (specs/006-prism-modes, quickstart section 3) ----
+# Drives the real window with wtype (a virtual keyboard), and only while Prism holds the keyboard, so
+# that no key can reach another window. Programs and files are stand-ins in a temporary home: the
+# "application", the "editor" (named nvim, so the line argument is checked), the "terminal" and the
+# "browser" only record what they were asked to do. What needs a person: the look of the rows (marks,
+# the message line, the collapsed group), the response times (SC-001, SC-002) and a hung mount.
+search_type() { # search_type TEXT: type into Prism's input, but only while it holds the keyboard
+	[ "$(prism_layers)" -eq 1 ] && [ "$(prism_keyboard)" = "exclusive" ] || return 1
+	wtype -- "$1"
+}
+search_key() { # search_key NAME: press one key (Return, Down, ...), with the same guard
+	[ "$(prism_layers)" -eq 1 ] && [ "$(prism_keyboard)" = "exclusive" ] || return 1
+	wtype -k "$1"
+}
+last_published() { grep 'search published' "$TMP/shell.log" | tail -1; }
+published_rows() { last_published | sed -n 's/.*search published rows=\([0-9]*\) .*/\1/p'; }
+wait_file() { # wait_file PATH SECONDS: the file exists (a program that only touches it leaves it empty)
+	local i
+	for i in $(seq 1 $(($2 * 20))); do
+		if [ -e "$1" ]; then
+			sleep 0.2 # let a program that writes into it finish
+			return 0
+		fi
+		sleep 0.05
+	done
+	return 1
+}
+open_prism() {
+	"$LUMEN" modules call prism clear >/dev/null 2>&1
+	"$LUMEN" modules call prism open >/dev/null 2>&1
+	prism_wait 1 3 || return 1
+	sleep 0.5
+}
+section_19() {
+echo "19. Prism search modes"
+if ! command -v wtype >/dev/null 2>&1; then
+	echo "  skip: wtype is not installed (needed to type into the window)"
+	return 0
+fi
+if [ ! -x "$ROOT/modules/prism-search/bin/search" ]; then
+	bad "the search helper is not built (make build)"
+	return 0
+fi
+H="$TMP/h" FB="$TMP/fakebin"
+rm -rf "$H" "$FB" "$TMP/launched" "$TMP/editor.args" "$TMP/browser.url" "$TMP/cmdran"
+mkdir -p "$H/Documents" "$H/Downloads" "$H/notes" "$H/.local/share/applications" "$H/.local/bin" "$FB"
+printf 'x\n' >"$H/Documents/report-doc.txt"
+printf 'x\n' >"$H/Downloads/report-dl.txt"
+printf 'first line\nthe needle is here\n' >"$H/notes/report-note.md"
+printf '#!/bin/sh\ntouch %q\n' "$TMP/launched" >"$FB/fakeapp"
+printf '#!/bin/sh\ntouch %q\n' "$TMP/cmdran" >"$H/.local/bin/lumentestcmd"
+printf '#!/bin/sh\nprintf "%%s\\n" "$@" >%q\n' "$TMP/editor.args" >"$FB/nvim"
+printf '#!/bin/sh\nshift\nexec "$@"\n' >"$FB/faketerm"
+printf '#!/bin/sh\nprintf "%%s\\n" "$1" >%q\n' "$TMP/browser.url" >"$FB/fakebrowser"
+chmod +x "$FB"/* "$H/.local/bin/lumentestcmd"
+printf '[Desktop Entry]\nType=Application\nName=Lumentestapp\nExec=%s\n' "$FB/fakeapp" >"$H/.local/share/applications/lumentestapp.desktop"
+apply_config '{"log":{"level":"debug"},"modules":{"prism-search":{"searchUrl":"https://engine.test/?q=%s"}}}'
+if start_shell HOME="$H" XDG_CACHE_HOME="$TMP/cache19" EDITOR="$FB/nvim" TERMINAL="$FB/faketerm" BROWSER="$FB/fakebrowser"; then
+	wait_log 'module:prism","msg":"prism loaded' 5 || true
+	SHOW=$("$LUMEN" modules show prism-search 2>&1)
+	check "prism-search loads with no settings error" grep -q 'state: loaded' <<<"$SHOW"
+	check "prism-search offers no command (Principle VIII)" bash -c '! grep -Eq "^  (toggle|open|close|clear)$" <<<"$1"' _ "$SHOW"
+	SHOW=$("$LUMEN" modules show prism 2>&1)
+	check "the search source is a shown contribution to prism/sources" grep -Eq 'prism-search/search +prism-search +shown' <<<"$SHOW"
+	[ "$(prism_layers)" -eq 0 ] && ok "no Prism surface exists before the command" || bad "a Prism surface exists before the command"
+
+	# Apps: found, launched, and Prism closes (US1).
+	if open_prism; then
+		search_type "@a lumentest" && sleep 1
+		[ "$(published_rows)" = "1" ] && ok "@a finds the one application" || bad "@a lumentest published $(published_rows) rows: $(last_published)"
+		search_key Return
+		wait_file "$TMP/launched" 3 && ok "Enter launches the application" || bad "the application was not launched"
+		prism_wait 0 3 && ok "Prism closes after a launch" || bad "Prism is still open after a launch"
+	else
+		bad "Prism did not open for the apps check"
+	fi
+
+	# Files: the priority folders, other folders of the home and the system group; Enter opens the first
+	# row (Downloads comes before Documents) in the editor, inside the stand-in terminal (US2).
+	if open_prism; then
+		search_type "@f report" && sleep 2
+		R=$(published_rows)
+		[ -n "$R" ] && [ "$R" -ge 3 ] && ok "@f report lists the three files of the temporary home ($R rows with the system group)" || bad "@f report published ${R:-nothing}: $(last_published)"
+		check "the file search is done" grep -q 'search published rows=[0-9]* done=true' <(last_published)
+		search_key Return
+		wait_file "$TMP/editor.args" 3 && ok "Enter on a file starts the editor" || bad "the editor was not started"
+		check "the first file is the one in Downloads" grep -q 'report-dl.txt' "$TMP/editor.args"
+		prism_wait 0 3 && ok "Prism closes after opening a file" || bad "Prism is still open after opening a file"
+	else
+		bad "Prism did not open for the files check"
+	fi
+	# A directory in the query limits the search to it.
+	rm -f "$TMP/editor.args"
+	if open_prism; then
+		search_type "@f report $H/notes" && sleep 2
+		[ "$(published_rows)" = "1" ] && ok "@f with a directory searches only that directory" || bad "@f report <dir> published $(published_rows) rows: $(last_published)"
+		"$LUMEN" modules call prism close >/dev/null 2>&1
+		prism_wait 0 3 || true
+	fi
+
+	# Grep: the line is found and the editor opens on it (US4).
+	rm -f "$TMP/editor.args"
+	if open_prism; then
+		search_type "@g needle notes/report-note.md" && sleep 1
+		[ "$(published_rows)" = "1" ] && ok "@g finds the one matching line" || bad "@g published $(published_rows) rows: $(last_published)"
+		search_key Return
+		wait_file "$TMP/editor.args" 3 && ok "Enter on a match starts the editor" || bad "the editor was not started for a match"
+		check "the editor is told the line (+2) and the file" bash -c 'grep -qx "+2" "$1" && grep -q "report-note.md" "$1"' _ "$TMP/editor.args"
+		prism_wait 0 3 || true
+	else
+		bad "Prism did not open for the grep check"
+	fi
+
+	# Tab completion (US8): the file word is completed, so the search and Enter use the full name.
+	rm -f "$TMP/editor.args"
+	if open_prism; then
+		search_type "@g needle notes/rep" && sleep 1
+		search_key Tab && sleep 1.5
+		[ "$(published_rows)" = "1" ] && ok "Tab completes the file word and the grep finds the line" || bad "after Tab @g published $(published_rows) rows: $(last_published)"
+		check "Tab logged a completion that changed the text" grep -q 'search completed changed=true' "$TMP/shell.log"
+		search_key Return
+		wait_file "$TMP/editor.args" 3 && check "the completed file is the one opened" grep -q "report-note.md" "$TMP/editor.args" || bad "the editor was not started after Tab"
+		prism_wait 0 3 || true
+	else
+		bad "Prism did not open for the Tab check"
+	fi
+
+	# Tab does nothing in the apps mode (FR-038).
+	if open_prism; then
+		search_type "@a lumentest" && sleep 1
+		N=$(count_log 'search completed')
+		search_key Tab && sleep 0.5
+		[ "$(count_log 'search completed')" = "$N" ] && ok "Tab in the apps mode completes nothing" || bad "Tab in the apps mode started a completion"
+		"$LUMEN" modules call prism close >/dev/null 2>&1
+		prism_wait 0 3 || true
+	else
+		bad "Prism did not open for the apps Tab check"
+	fi
+
+	# Web: the browser gets the exact encoded text (US5).
+	if open_prism; then
+		search_type "@w a b&c" && sleep 0.5
+		search_key Return
+		wait_file "$TMP/browser.url" 3 && ok "Enter on the web row starts the browser" || bad "the browser was not started"
+		[ "$(cat "$TMP/browser.url" 2>/dev/null)" = "https://engine.test/?q=a%20b%26c" ] && ok "the browser receives the exact encoded query" || bad "browser got: $(cat "$TMP/browser.url" 2>/dev/null)"
+		prism_wait 0 3 && ok "Prism closes after the web search" || bad "Prism is still open after the web search"
+	else
+		bad "Prism did not open for the web check"
+	fi
+
+	# Commands: found, and choosing one runs nothing (US3).
+	if open_prism; then
+		search_type "@s lumentestcmd" && sleep 1
+		[ "$(published_rows)" = "1" ] && ok "@s finds the command" || bad "@s published $(published_rows) rows: $(last_published)"
+		search_key Return
+		sleep 1
+		[ ! -e "$TMP/cmdran" ] && ok "choosing a command does not run it" || bad "the command was run"
+		[ "$(prism_layers)" -eq 1 ] && ok "Prism stays open after choosing a command" || bad "Prism closed after choosing a command"
+		"$LUMEN" modules call prism close >/dev/null 2>&1
+		prism_wait 0 3 || true
+	else
+		bad "Prism did not open for the commands check"
+	fi
+
+	# A lone "@" is the start of a prefix: nothing is listed (US6, refinement).
+	if open_prism; then
+		search_type "@" && sleep 1
+		check "a lone @ lists nothing" bash -c '[ "$1" = "0" ]' _ "$(published_rows)"
+		"$LUMEN" modules call prism close >/dev/null 2>&1
+		prism_wait 0 3 || true
+	else
+		bad "Prism did not open for the lone @ check"
+	fi
+
+	# Default mode: the application and the web row, without a prefix (US6).
+	if open_prism; then
+		search_type "lumentestapp" && sleep 2
+		R=$(published_rows)
+		[ -n "$R" ] && [ "$R" -ge 2 ] && ok "the default mode lists the application and the web row ($R rows)" || bad "default mode published ${R:-nothing}: $(last_published)"
+		# FR-031a: nothing was moved, so Enter takes the first row (the application), not the
+		# web row that is last and was the only row at the first publish.
+		rm -f "$TMP/launched" "$TMP/browser.url"
+		search_key Return
+		wait_file "$TMP/launched" 3 && ok "the first row is selected when all results are shown" || bad "Enter did not launch the first row"
+		[ ! -e "$TMP/browser.url" ] && ok "the web row was not the selected one" || bad "the web row was selected, not the first row"
+		"$LUMEN" modules call prism close >/dev/null 2>&1
+		prism_wait 0 3 || true
+	else
+		bad "Prism did not open for the default mode check"
+	fi
+
+	# Nothing is searched, and nothing is published, while Prism is closed or the text is empty.
+	N=$(count_log 'search published')
+	open_prism && sleep 0.5
+	"$LUMEN" modules call prism close >/dev/null 2>&1
+	prism_wait 0 3 || true
+	[ "$(count_log 'search published')" -le $((N + 2)) ] && ok "opening and closing with no text starts no search" || bad "an empty text started a search"
+
+	# A bad setting falls back for its key only, and the report names the module and the key.
+	apply_config '{"log":{"level":"debug"},"modules":{"prism-search":{"rowsPerGroup":0,"grepCase":"loose","searchUrl":"ftp://x/%s","maxFiles":"many","systemGroup":false}}}'
+	SHOW=$("$LUMEN" modules show prism-search 2>&1)
+	for key in rowsPerGroup grepCase maxFiles; do
+		check "a wrong $key is reported with its key" grep -Eq "^  $key: must be " <<<"$SHOW"
+	done
+	"$LUMEN" version >/dev/null 2>&1 && ok "the shell keeps running with wrong search settings" || bad "the shell stopped with wrong search settings"
+	ERRS=$(grep -E 'TypeError|ReferenceError|Unable to assign|Binding loop|runtime error' "$TMP/shell.log" | head -3 | cut -c1-300)
+	if [ -z "$ERRS" ]; then ok "no QML errors or binding loops"; else
+		bad "no QML errors or binding loops"
+		echo "$ERRS"
+	fi
+else
+	bad "shell did not start for the search checks"
 	cat "$TMP/shell.log"
 fi
 stop_shell

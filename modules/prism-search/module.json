@@ -1,0 +1,27 @@
+{
+  "id": "prism-search",
+  "name": "Prism search",
+  "version": "1.0.0",
+  "api": "1.3",
+  "description": "The six search modes of Prism: default, apps, files, commands, grep and web. Apps launch, files open in EDITOR, the web row opens BROWSER, commands are never run. It never takes the keyboard: it works inside the Prism window.",
+  "permissions": ["contribute:prism", "helpers"],
+  "helpers": [{"name": "search", "path": "bin/search"}],
+  "contributions": [
+    {"id": "search", "name": "Search", "target": {"module": "prism", "point": "sources"}, "file": "Source.qml"}
+  ],
+  "settings": {
+    "rowsPerGroup": {"type": "integer", "default": 20, "min": 1, "max": 200, "description": "Rows shown per group (apps, each file group, commands); the rest becomes a 'more' row"},
+    "maxFiles": {"type": "integer", "default": 200000, "min": 1000, "max": 5000000, "description": "Files looked at per search stage before the stage stops"},
+    "searchTimeMs": {"type": "integer", "default": 1500, "min": 100, "max": 30000, "description": "Time a search stage may take, in milliseconds; also stops slow or hung mounts"},
+    "hiddenFiles": {"type": "boolean", "default": false, "description": "Match hidden files and folders inside the folders that are searched"},
+    "hiddenHomeDirs": {"type": "boolean", "default": false, "description": "Also search hidden folders of the home folder other than .cache, .local and .config"},
+    "systemGroup": {"type": "boolean", "default": true, "description": "Show the collapsed group of system files"},
+    "systemRoots": {"type": "stringlist", "default": ["/etc", "/usr", "/opt", "/var", "/srv"], "maxItems": 16, "description": "Absolute folders searched for system files; /proc, /sys, /dev, /run and /tmp are never searched"},
+    "commandDirs": {"type": "stringlist", "default": [], "maxItems": 16, "description": "Absolute folders searched for commands after the default command folders"},
+    "grepMaxMatches": {"type": "integer", "default": 500, "min": 10, "max": 10000, "description": "Matches after which grep stops (at most 1000 are shown)"},
+    "grepCase": {"type": "string", "default": "smart", "enum": ["smart", "ignore", "match"], "description": "Case rule of grep: smart ignores case unless the pattern has an uppercase letter"},
+    "searchUrl": {"type": "string", "default": "https://duckduckgo.com/?q=%s", "maxLength": 200, "description": "Web search address with exactly one %s where the query goes; must start with http:// or https://"},
+    "terminal": {"type": "string", "default": "", "maxLength": 128, "description": "Terminal program for the editor and for Terminal=true applications; empty means the TERMINAL variable"},
+    "terminalExecFlag": {"type": "string", "default": null, "maxLength": 16, "description": "Flag before the command in the terminal; unset uses the known flag of the terminal, else -e"}
+  }
+}

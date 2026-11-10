@@ -14,7 +14,7 @@ import (
 // manifest, the theme's role list and the contract in step: 105 keys with their types,
 // defaults and ranges.
 
-const prismSettingCount = 105
+const prismSettingCount = 108 // 105 of Feature V and 3 colors of Prism 1.1.0
 
 var prismWeights = []string{"thin", "light", "regular", "medium", "semibold", "bold", "black"}
 
@@ -103,6 +103,8 @@ func prismSettings() map[string]settingRule {
 		"selectedRole": "primary", "selectedTextRole": "onPrimary", "hoverRole": "surfaceVariant",
 		"separatorRole": "outline", "footerRole": "onSurfaceVariant", "emptyRole": "onSurfaceVariant",
 		"shadowRole": "background", "backdropRole": "background",
+		// Prism 1.1.0 (specs/006-prism-modes): marked text, the hint line and the error line.
+		"matchRole": "primary", "messageRole": "onSurfaceVariant", "errorRole": "error",
 	} {
 		s[key] = settingRule{Type: "string", Default: def, Enum: roles}
 	}

@@ -22,6 +22,28 @@ Item {
     readonly property bool showIcon: settings.showIcon !== false
     readonly property bool showSubtitle: settings.showSubtitle !== false && entry.subtitle !== ""
     readonly property bool showHint: settings.showHint !== false && entry.hint !== ""
+    readonly property var marks: entry.marks ?? []
+    // The title with its marked parts (Prism 1.1.0) in bold and in the match color; on the
+    // selected row the marked parts take the selected text color, which always has contrast
+    // against the selected background.
+    readonly property string titleHtml: {
+        if (marks.length === 0)
+            return "";
+
+        const chars = Array.from(entry.title);
+        const color = selected ? colors.selectedText : colors.match;
+        const escape = (c) => {
+            return c === "&" ? "&amp;" : (c === "<" ? "&lt;" : (c === ">" ? "&gt;" : c));
+        };
+        let out = "";
+        let at = 0;
+        for (const m of marks) {
+            out += chars.slice(at, m[0]).map(escape).join("");
+            out += "<b><font color=\"" + color + "\">" + chars.slice(m[0], m[1]).map(escape).join("") + "</font></b>";
+            at = m[1];
+        }
+        return out + chars.slice(at).map(escape).join("");
+    }
     readonly property string iconUrl: {
         const name = entry.icon ?? "";
         if (name === "")
@@ -99,7 +121,8 @@ Item {
 
         Text {
             width: texts.width
-            text: row.entry.title
+            text: row.marks.length > 0 ? row.titleHtml : row.entry.title
+            textFormat: row.marks.length > 0 ? Text.StyledText : Text.PlainText
             elide: Text.ElideRight
             maximumLineCount: 1
             color: row.selected ? row.colors.selectedText : row.colors.title

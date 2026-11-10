@@ -11,6 +11,9 @@
 | `notify-send` (libnotify) and a notification daemon | Optional | The notification about dropped list entries of the bar | Only the log entry is written |
 | Qt 6 `qmltestrunner` | Dev only | `make test` (QML unit tests of the bar) | `make test` fails with a clear message. On some systems `/usr/bin/qmltestrunner` is the Qt 5 runner, which prints nothing; the Makefile uses `/usr/lib/qt6/bin/qmltestrunner` when it exists |
 | `awww` / `swww` | Optional | `palette` helper, wallpaper detection | Set `theme.wallpaper` to a file path, or the fallback palette is used |
+| `EDITOR`, `TERMINAL` (or the `terminal` setting) | Optional | Prism: opening a file or a grep match; running a `Terminal=true` application | Prism stays open and shows an error that names the missing variable and how to set it. A shell startup file such as `.bashrc` is not read by the shell: set them in the session environment (niri: an `environment { }` block in `config.kdl`) |
+| `BROWSER` | Optional | Prism: the web search row | Prism stays open and shows an error that names `BROWSER` |
+| `wtype` | Dev only | `make smoke` (section 19 types into Prism) | That section is skipped |
 
 Go dependencies: none. All Go programs use only the standard library.
 

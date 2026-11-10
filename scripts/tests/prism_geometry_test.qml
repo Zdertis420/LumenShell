@@ -426,6 +426,9 @@ TestCase {
             "selectedTextRole": text,
             "footerRole": text,
             "emptyRole": text,
+            "matchRole": text,
+            "messageRole": text,
+            "errorRole": text,
             "inputOpacity": 1,
             "selectedOpacity": 1
         };
@@ -437,9 +440,32 @@ TestCase {
 
     function test_badContrastNamesBothKeys() {
         const w = Geometry.contrastWarnings(colors(white, white));
-        compare(w.length, 8);
+        compare(w.length, 11);
         verify(w[0].problem.indexOf("inputRole") >= 0);
         compare(w[0].key, "inputTextRole");
+    }
+
+    // The colors of marked text, the hint line and the error line are judged against the
+    // window background (specs/006-prism-modes, Principle II).
+    function test_newRolesAreCheckedAgainstTheWindow() {
+        const c = colors(white, black);
+        c.matchRole = black;
+        c.messageRole = black;
+        c.errorRole = black;
+        const w = Geometry.contrastWarnings(c);
+        compare(w.length, 3);
+        compare(w.map((x) => {
+            return x.key;
+        }).sort().join(","), "errorRole,matchRole,messageRole");
+        verify(w[0].problem.indexOf("windowRole") >= 0);
+    }
+
+    function test_missingNewRolesAreSkipped() {
+        const c = colors(white, black);
+        delete c.matchRole;
+        delete c.messageRole;
+        delete c.errorRole;
+        compare(Geometry.contrastWarnings(c).length, 0);
     }
 
     function test_opacityIsBlendedOverTheWindow() {

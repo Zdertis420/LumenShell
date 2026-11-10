@@ -144,6 +144,8 @@ What changed:
 What to do:
 ```
 
+The interface did not change in Feature VI (the Prism modes). Prism's own source slot gained `setMessage`, a `keepSelection` argument of `setRows` and row `marks` (Prism 1.1.0), and then `setText` and the `completeRequested` signal for Tab completion (Prism 1.2.0), all documented in [prism.md](prism.md#sources); they are Prism's, not members of `api`.
+
 No migrations: version 1.3 only raised a limit: a module may declare up to 128 settings (it was 64). A module that declares more than 64 settings must declare `"api": "1.3"`; a 1.2 shell refuses it with the required and available versions. The Prism search window ([prism.md](prism.md)) is the first module that needs it, and takes its rows from other modules through its own extension point, `prism/sources`, with no new `api` member.
 
 No migrations: version 1.2 only added things (the unset default `"default": null`, and new members of the bar's slot: `vertical`, `maxLength`, `font`, `itemPadding`, `itemRadius`, `textRole` and `focusRole`, documented in [bar.md](bar.md)), so it is additive and no module needs to change. A module that reads one of them declares `"api": "1.2"`; a 1.1 shell refuses it with the required and available versions.

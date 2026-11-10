@@ -17,6 +17,13 @@ PanelWindow {
     required property string text
     required property bool shown
     required property int prefixLength
+    // The one-line message a source set (Prism 1.1.0): a hint or an error, shown between the
+    // input and the results.
+    property string message: ""
+    property string messageKind: "info"
+    // Which row to select when the rows change. Main.qml decides, so that a source can keep
+    // the selection while rows arrive.
+    property int pendingIndex: 0
     // The named screen, or null to let the compositor pick the focused output (research R2).
     property var wantedScreen: null
     readonly property var settings: look.settings
@@ -39,6 +46,10 @@ PanelWindow {
     readonly property int rowCount: rows.length
     readonly property int visibleRows: Math.min(rowCount, sizes.maxRows)
     property int selectedIndex: -1
+    // True once the user moved the selection since the text last changed (or the window opened).
+    // Main honors a source's keepSelection only then, so the first row stays selected while
+    // rows arrive in stages (Feature VI, FR-031a).
+    property bool navigated: false
     property int hoverIndex: -1
     readonly property int maxTextLength: 2.14748e+09 // documented constant: the input keeps any length
     // ---- layout of the panel's content ----
@@ -47,7 +58,8 @@ PanelWindow {
     readonly property int innerWidth: Math.max(0, sizes.width - twice * frame)
     readonly property bool showFooter: settings.showFooter === true && (settings.footerHints ?? []).length > 0
     readonly property string emptyString: text === "" ? (settings.emptyNoSource ?? "") : (settings.emptyNoMatch ?? "")
-    readonly property bool showEmpty: rowCount === 0 && emptyString !== ""
+    readonly property bool showMessage: message !== ""
+    readonly property bool showEmpty: rowCount === 0 && emptyString !== "" && !showMessage
     readonly property int inputBoxHeight: input.implicitHeight + twice * sizes.inputPadding
     // The parts in order, their heights and their positions inside the content (data-model:
     // the results area never grows past maxHeight, and the anchor edge stays fixed).
@@ -55,10 +67,11 @@ PanelWindow {
         const wantRows = rowCount > 0 ? visibleRows * sizes.rowHeight + (visibleRows - 1) * sizes.rowGap : (showEmpty ? emptyLabel.implicitHeight + twice * sizes.padding : 0);
         const h = {
             "input": inputBoxHeight,
+            "message": showMessage ? messageLabel.implicitHeight : 0,
             "results": wantRows,
             "footer": showFooter ? footerRow.implicitHeight : 0
         };
-        const order = settings.inputPosition === "bottom" ? ["results", "input", "footer"] : ["input", "results", "footer"];
+        const order = settings.inputPosition === "bottom" ? ["results", "message", "input", "footer"] : ["input", "message", "results", "footer"];
         const parts = order.filter((k) => {
             return h[k] > 0;
         });
@@ -105,10 +118,21 @@ PanelWindow {
     signal textEdited(string value)
     signal selected(int index)
     signal rowChosen(int index)
+    // Tab (Prism 1.2.0): the sources may complete the text; Prism itself does nothing else.
+    signal completeRequested()
     signal hidden()
+    // Where Main wants the text cursor after it set the text from a source ({pos, n}; n makes
+    // every request a change). Applied after the text binding updated.
+    property var cursorRequest: ({
+        "pos": -1,
+        "n": 0
+    })
 
     function select(index: int) {
-        const i = rowCount === 0 ? -1 : Math.max(0, Math.min(rowCount - 1, index));
+        // rows.length and not rowCount: this runs from onRowsChanged, where the binding of
+        // rowCount may not have been re-evaluated yet (a change from 0 to 1 row would select none).
+        const count = rows.length;
+        const i = count === 0 ? -1 : Math.max(0, Math.min(count - 1, index));
         if (i !== selectedIndex) {
             selectedIndex = i;
             selected(i);
@@ -118,6 +142,12 @@ PanelWindow {
 
     }
 
+    // A selection made by the user (keys, click): remembered in `navigated`.
+    function userSelect(index: int) {
+        navigated = true;
+        select(index);
+    }
+
     // Moves the selection; Up and Down wrap when the user asked for it, paging never does.
     function step(delta: int, allowWrap: bool) {
         if (rowCount === 0)
@@ -125,9 +155,9 @@ PanelWindow {
 
         const next = selectedIndex + delta;
         if (allowWrap && settings.wrapSelection === true)
-            select((next + rowCount) % rowCount);
+            userSelect((next + rowCount) % rowCount);
         else
-            select(next);
+            userSelect(next);
     }
 
     function handleKey(event) {
@@ -155,15 +185,19 @@ PanelWindow {
         case Qt.Key_Home:
             // In a non-empty input Home and End move the text cursor.
             if (text === "") {
-                select(0);
+                userSelect(0);
                 event.accepted = true;
             }
             break;
         case Qt.Key_End:
             if (text === "") {
-                select(rowCount - 1);
+                userSelect(rowCount - 1);
                 event.accepted = true;
             }
+            break;
+        case Qt.Key_Tab:
+            completeRequested();
+            event.accepted = true;
             break;
         case Qt.Key_Return:
         case Qt.Key_Enter:
@@ -183,8 +217,20 @@ PanelWindow {
         settled = false;
         settle.restart();
     }
-    onRowsChanged: select(0)
-    onTextChanged: select(0)
+    onRowsChanged: select(pendingIndex)
+    onTextChanged: {
+        navigated = false;
+        select(0);
+    }
+    onCursorRequestChanged: {
+        const wanted = cursorRequest.pos;
+        // After the binding of the text has been applied to the input.
+        Qt.callLater(() => {
+            if (wanted >= 0)
+                input.cursorPosition = Math.min(wanted, input.text.length);
+
+        });
+    }
     color: "transparent"
     exclusionMode: ExclusionMode.Normal
     WlrLayershell.layer: WlrLayer.Overlay
@@ -310,10 +356,15 @@ PanelWindow {
                 // The highlight behind a recognized prefix. TextInput gives the position of a
                 // character in its own space, including the scroll of a long text (research R4).
                 Item {
-                    x: input.x
-                    y: input.y
-                    width: input.width
-                    height: input.height
+                    // The clip grows by a margin on every side (never beyond the input's
+                    // padding), so the rounded outline of the highlight is not cut off; only the
+                    // scroll of a long text is clipped.
+                    readonly property int margin: Math.min(win.sizes.rowGap, win.sizes.inputPadding)
+
+                    x: input.x - margin
+                    y: input.y - margin
+                    width: input.width + win.twice * margin
+                    height: input.height + win.twice * margin
                     clip: true
 
                     Rectangle {
@@ -331,9 +382,9 @@ PanelWindow {
                         }
 
                         visible: win.prefixLength > 0
-                        x: from.x - win.sizes.rowGap
+                        x: from.x
                         y: 0
-                        width: to.x - from.x + win.twice * win.sizes.rowGap
+                        width: to.x - from.x + win.twice * parent.margin
                         height: parent.height
                         radius: win.sizes.rowRadius
                         color: win.colors.prefix
@@ -392,6 +443,22 @@ PanelWindow {
                 color: win.colors.separator
             }
 
+            Text {
+                id: messageLabel
+
+                visible: win.showMessage
+                x: win.frame
+                y: win.frame + (win.plan.y.message ?? 0)
+                width: win.innerWidth
+                wrapMode: Text.WordWrap
+                text: win.message
+                color: win.messageKind === "error" ? win.colors.error : win.colors.message
+                font.family: win.fonts.empty.family
+                font.pixelSize: win.fonts.empty.pixelSize
+                font.weight: win.fonts.empty.weight
+                font.italic: win.fonts.empty.italic
+            }
+
             Item {
                 id: results
 
@@ -428,9 +495,9 @@ PanelWindow {
                                 win.hoverIndex = -1;
 
                         }
-                        onClicked: win.select(index)
+                        onClicked: win.userSelect(index)
                         onDoubleClicked: {
-                            win.select(index);
+                            win.userSelect(index);
                             win.rowChosen(index);
                         }
                     }

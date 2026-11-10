@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	binDir = tmp
-	for _, name := range []string{"lumen", "config", "palette", "modules"} {
+	for _, name := range []string{"lumen", "config", "palette", "modules", "search"} {
 		srcs, _ := filepath.Glob(filepath.Join(repoRoot, "scripts", "src", name, "*.go"))
 		args := append([]string{"build", "-o", filepath.Join(binDir, name)}, srcs...)
 		cmd := exec.Command("go", args...)

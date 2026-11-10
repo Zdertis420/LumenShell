@@ -8,7 +8,8 @@ Bundled modules. They load automatically (see [docs/module-api.md](../docs/modul
 | `bar-clock` | Time and date item for the bar (hours above minutes on a vertical bar) |
 | `bar-sound` | Output volume and mute item for the bar (with a helper that opens a mixer) |
 | `bar-battery` | Battery level item for the bar (hidden without a battery) |
-| `prism` | The Prism search window (the window only): opened by a command you bind, placed at one of nine positions, themed by roles, with a mode prefix (`@a`, `@f`, `@w`, `@s`, `@g`) and rows that other modules supply ([docs/prism.md](../docs/prism.md)) |
+| `prism` | The Prism search window: opened by a command you bind, placed at one of nine positions, themed by roles, with a mode prefix (`@a`, `@f`, `@w`, `@s`, `@g`) and rows that other modules supply ([docs/prism.md](../docs/prism.md)) |
+| `prism-search` | The six search modes of Prism (default, apps, files, commands, grep, web): launches applications, opens files and grep matches in `EDITOR`, opens the web search in `BROWSER`; never runs commands ([docs/prism.md](../docs/prism.md#search-modes)) |
 
 The three item modules each carry the same small `ItemLook.qml` (their own font, padding, radius and color settings, else the bar's values); a test keeps the copies equal.
 | `test-surface` | A window that shows the theme, configuration, module list and log, for verification |
